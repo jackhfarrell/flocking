@@ -3,6 +3,7 @@ module Flocking
 using CairoMakie
 using DifferentialEquations
 using LinearAlgebra
+using ProgressMeter
 using Random
 using Statistics
 using StochasticDiffEq: EM
@@ -123,12 +124,21 @@ function noise!(dθ, θ, cache::LatticeCache, t)
     nothing
 end
 
-function simulate(params::ModelParams; T=5.0, dt=0.01, saveat=0.1, seed=1)
+function simulate(params::ModelParams; T=5.0, dt=0.01, saveat=0.1, seed=1, progress=false)
     rng = MersenneTwister(seed)
     cache = LatticeCache(params)
     θ0 = 2π .* rand(rng, params.Lx * params.Ly)
     problem = SDEProblem(drift!, noise!, θ0, (0.0, T), cache; noise_rate_prototype=similar(θ0))
-    solve(problem, EM(); dt, saveat, adaptive=false, rng)
+
+    if progress
+        meter = Progress(ceil(Int, T / dt); desc="Simulating")
+        condition(u, t, integrator) = t > first(integrator.sol.prob.tspan)
+        affect!(integrator) = next!(meter)
+        callback = DiscreteCallback(condition, affect!; save_positions=(false, false))
+        solve(problem, EM(); dt, saveat, adaptive=false, rng, callback)
+    else
+        solve(problem, EM(); dt, saveat, adaptive=false, rng)
+    end
 end
 
 function magnetization_magnitude(θ)

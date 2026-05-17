@@ -1,5 +1,6 @@
 using Test
 using Random
+using StochasticDiffEq
 
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
@@ -45,6 +46,89 @@ end
     _, c, counts = radial_correlation(theta, L)
     @test all(counts .> 0)
     @test all(isapprox.(c, 1.0; atol=1e-12))
+end
+
+@testset "chunked correlator geometry" begin
+    L = 6
+    shell_data = radial_displacement_shells(L)
+    oriented_shell_data = radial_displacement_shells(L; oriented=true)
+    @test length(shell_data.radii) == L ÷ 2
+    @test length(shell_data.shells) == L ÷ 2
+    @test all(!isempty, shell_data.shells)
+    @test length(oriented_shell_data.radii) == L ÷ 2
+    @test length(oriented_shell_data.shells) == L ÷ 2
+    @test all(!isempty, oriented_shell_data.shells)
+
+    for shell in shell_data.shells, (dx, dy) in shell
+        @test any(isequal((mod(-dx, L), mod(-dy, L))), shell)
+        for y in 1:L, x in 1:L
+            forward = site_index(x + dx, y + dy, L)
+            backward = site_index(x - dx, y - dy, L)
+            @test 1 <= forward <= L^2
+            @test 1 <= backward <= L^2
+        end
+    end
+
+    for shell in oriented_shell_data.shells, (dx, dy) in shell
+        @test !any(isequal((mod(-dx, L), mod(-dy, L))), shell)
+    end
+end
+
+@testset "chunked correlator window" begin
+    params = ModelParams(; L=6, Q=1.0, J=2.0, v=1.0)
+    shell_data = radial_displacement_shells(params.L; oriented=true)
+    window = [zeros(params.L^2) for _ in 1:5]
+    F = chunk_correlator(window, params, shell_data)
+    @test size(F) == (params.L ÷ 2, 3)
+    @test all(isapprox.(F, 0.0; atol=1e-12))
+
+    mean = zeros(size(F))
+    m2 = zeros(size(F))
+    stderr1 = online_mean_stderr!(mean, m2, F, 1)
+    @test all(iszero, stderr1)
+    stderr2 = online_mean_stderr!(mean, m2, F .+ 1, 2)
+    @test all(stderr2 .>= 0)
+end
+
+@testset "chunked correlator solver smoke" begin
+    L = 4
+    params = ModelParams(; L, Q=0.1, J=1.0, v=0.2)
+    dt = 0.001
+    sample_stride = 1
+    T_max = 2
+    rng = Random.MersenneTwister(7)
+    theta = initial_angles(rng, L, :random)
+    work = LatticeFlockingSDE.DriftWorkspace(params)
+    solver = SRIW1()
+
+    burnin_problem = SDEProblem(LatticeFlockingSDE.drift!, LatticeFlockingSDE.noise!,
+        theta, (0.0, 2dt), work)
+    burnin_solution = solve(burnin_problem, solver; dt, adaptive=false,
+        save_everystep=false, save_start=false, rng)
+    theta = wrap_angles!(collect(burnin_solution.u[end]))
+
+    shell_data = radial_displacement_shells(L; oriented=true)
+    F_mean = zeros(Float64, L ÷ 2, T_max + 1)
+    F_m2 = zeros(Float64, L ÷ 2, T_max + 1)
+    chunk_advance_steps = (2 * T_max + 1) * sample_stride
+    saveat = collect(0:sample_stride:chunk_advance_steps) .* dt
+
+    for chunk in 1:2
+        chunk_problem = SDEProblem(LatticeFlockingSDE.drift!, LatticeFlockingSDE.noise!,
+            theta, (0.0, chunk_advance_steps * dt), work)
+        chunk_solution = solve(chunk_problem, solver; dt, adaptive=false,
+            saveat, save_start=true, rng)
+        @test length(chunk_solution.u) == 2T_max + 2
+        window = [wrap_angles!(collect(state)) for state in chunk_solution.u[1:(end - 1)]]
+        @test length(window) == 2T_max + 1
+        F_chunk = chunk_correlator(window, params, shell_data)
+        F_stderr = online_mean_stderr!(F_mean, F_m2, F_chunk, chunk)
+        @test size(F_stderr) == size(F_mean)
+        theta = wrap_angles!(collect(chunk_solution.u[end]))
+    end
+
+    @test size(F_mean) == (L ÷ 2, T_max + 1)
+    @test all(isfinite, F_mean)
 end
 
 @testset "small smoke run" begin
