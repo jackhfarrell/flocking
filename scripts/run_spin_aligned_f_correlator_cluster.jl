@@ -305,6 +305,12 @@ function main()
             end
         end
 
+        loginfo("computing spin-aligned F chunk",
+            :array_id => array_id,
+            :chunk => chunk,
+            :nchunks => nchunks,
+            :nradii => length(radii),
+            :ntimes => ntimes)
         F_chunk = spin_aligned_f_correlator(window, params, radii)
         F_stderr = online_mean_stderr!(F_mean, F_m2, F_chunk, chunk)
         loginfo("rolling spin-aligned F",
@@ -346,6 +352,9 @@ function main()
     result = (; config, radii, times, F_mean, F_stderr)
 
     mkpath(dirname(output))
+    loginfo("saving headless spin-aligned F correlator",
+        :array_id => array_id,
+        :output => output)
     jldsave(output; result)
     loginfo("saved headless spin-aligned F correlator",
         :array_id => array_id,
