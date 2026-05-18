@@ -32,6 +32,10 @@ against known XY expectations. The code reports `eta_fit` from
 `C(r) ~ r^(-eta)` and the low-temperature spin-wave reference
 `eta_lowT_spin_wave = 1/(2*pi*J)`.
 
+For a live look at equilibration noise, run
+`scripts/equilibration_diagnostic_live.jl` to watch the trailing energy-density
+trajectory update block by block.
+
 Suggested organization for future baseline runs:
 
 ```text

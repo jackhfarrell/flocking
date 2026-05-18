@@ -86,3 +86,40 @@ function online_mean_stderr!(mean::AbstractArray{<:Real}, m2::AbstractArray{<:Re
     end
     return stderr
 end
+
+function observable_window_range(values::AbstractVector{<:Real}, window::Integer)
+    window > 0 || throw(ArgumentError("window must be positive"))
+    length(values) >= window || return Inf
+    tail = @view values[(end - window + 1):end]
+    all(isfinite, tail) || return Inf
+    return maximum(tail) - minimum(tail)
+end
+
+function eta_window_range(etas::AbstractVector{<:Real}, window::Integer)
+    return observable_window_range(etas, window)
+end
+
+function eta_equilibrium_reached(etas::AbstractVector{<:Real}, window::Integer, threshold::Real)
+    threshold >= 0 || throw(ArgumentError("threshold must be nonnegative"))
+    return eta_window_range(etas, window) <= threshold
+end
+
+function equilibrium_window_blocks(block_time::Real, window_time::Real, min_blocks::Integer)
+    block_time > 0 || throw(ArgumentError("block_time must be positive"))
+    window_time >= 0 || throw(ArgumentError("window_time must be nonnegative"))
+    min_blocks > 0 || throw(ArgumentError("min_blocks must be positive"))
+    return max(Int(min_blocks), ceil(Int, window_time / block_time))
+end
+
+function equilibrium_stationarity_reached(etas::AbstractVector{<:Real},
+        energies::AbstractVector{<:Real}, magnetizations::AbstractVector{<:Real},
+        window::Integer, eta_threshold::Real, energy_threshold::Real,
+        magnetization_threshold::Real)
+    eta_range = observable_window_range(etas, window)
+    energy_range = observable_window_range(energies, window)
+    magnetization_range = observable_window_range(magnetizations, window)
+    reached = eta_range <= eta_threshold &&
+        energy_range <= energy_threshold &&
+        magnetization_range <= magnetization_threshold
+    return (; reached, eta_range, energy_range, magnetization_range, window)
+end

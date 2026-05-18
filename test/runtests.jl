@@ -1,6 +1,7 @@
 using Test
 using Random
 using StochasticDiffEq
+using JLD2
 
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
@@ -90,6 +91,31 @@ end
     @test all(stderr2 .>= 0)
 end
 
+@testset "eta equilibrium predicate" begin
+    @test observable_window_range([0.3, 0.2, 0.25], 3) ≈ 0.1
+    @test eta_window_range([0.3, 0.2], 3) == Inf
+    @test eta_window_range([0.3, 0.2, 0.25], 3) ≈ 0.1
+    @test eta_window_range([0.3, NaN, 0.25], 3) == Inf
+    @test eta_equilibrium_reached([0.3, 0.2, 0.25], 3, 0.11)
+    @test !eta_equilibrium_reached([0.3, 0.2, 0.25], 3, 0.09)
+    @test equilibrium_window_blocks(5.0, 50.0, 5) == 10
+    @test equilibrium_window_blocks(5.0, 0.0, 5) == 5
+    stationarity = equilibrium_stationarity_reached(
+        [0.1, 0.11, 0.105],
+        [1.0, 1.01, 1.005],
+        [0.8, 0.79, 0.805],
+        3,
+        0.02,
+        0.02,
+        0.02,
+    )
+    @test stationarity.reached
+    @test stationarity.window == 3
+    @test_throws ArgumentError eta_window_range([0.1], 0)
+    @test_throws ArgumentError eta_equilibrium_reached([0.1], 1, -0.1)
+    @test_throws ArgumentError equilibrium_window_blocks(0.0, 1.0, 1)
+end
+
 @testset "chunked correlator solver smoke" begin
     L = 4
     params = ModelParams(; L, Q=0.1, J=1.0, v=0.2)
@@ -149,4 +175,29 @@ end
     @test hasproperty(result, :fit)
     @test !hasproperty(result, :helicity_modulus)
     @test !hasproperty(result, :eta_helicity)
+end
+
+@testset "production chunked correlator script smoke" begin
+    output = tempname() * ".jld2"
+    script = joinpath(@__DIR__, "..", "scripts", "run_chunked_correlator_production.jl")
+    project = joinpath(@__DIR__, "..")
+    run(`$(Base.julia_cmd()) --project=$project $script --L 6 --Q 0.0 --J 1.0 --v 0.0 --dt 0.001 --seed 3 --init ordered --equil-block-steps 1 --equil-max-blocks 1 --equil-window 1 --equil-window-time 0 --equil-eta-threshold 0.0 --equil-energy-threshold 0.0 --equil-magnetization-threshold 0.0 --equil-log-every 1 --sample-stride 1 --T-max 1 --nchunks 1 --chunk-log-samples 1 --fit-rmin 1 --fit-rmax 3 --output $output`)
+
+    loaded = JLD2.load(output)
+    @test haskey(loaded, "result")
+    result = loaded["result"]
+    @test hasproperty(result, :equilibration_history)
+    @test hasproperty(result, :equilibrium_reached)
+    @test hasproperty(result, :equilibrium_steps)
+    @test hasproperty(result, :equilibrium_time)
+    @test hasproperty(result, :F_mean)
+    @test hasproperty(result, :F_stderr)
+    @test hasproperty(result.equilibration_history, :window_blocks)
+    @test hasproperty(result.equilibration_history, :window_time)
+    @test hasproperty(result.config, :log_every_blocks)
+    @test result.config.log_every_blocks == 1
+    @test result.equilibrium_reached
+    @test result.equilibrium_steps == 1
+    @test size(result.F_mean) == (3, 2)
+    @test size(result.F_stderr) == (3, 2)
 end

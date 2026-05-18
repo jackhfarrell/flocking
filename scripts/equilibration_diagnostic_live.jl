@@ -1,6 +1,7 @@
 #!/usr/bin/env julia
 
 using ArgParse
+using GLMakie
 using JLD2
 using Random
 using Statistics
@@ -9,7 +10,7 @@ include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
 
 function parse_args()
-    settings = ArgParseSettings(description="Track block observables to choose burn-in for the 2D XY-lattice SDE.")
+    settings = ArgParseSettings(description="Track block observables with a live energy plot for the 2D XY-lattice SDE.")
     @add_arg_table! settings begin
         "--L"
             arg_type = Int
@@ -47,11 +48,39 @@ function parse_args()
         "--init"
             arg_type = String
             default = "random"
+        "--live-energy-window-time"
+            arg_type = Float64
+            default = 50.0
         "--output"
             arg_type = String
-            default = "results/equilibration_L24.jld2"
+            default = "results/equilibration_L24_live.jld2"
     end
     return ArgParse.parse_args(settings)
+end
+
+function start_live_energy_plot(window_blocks::Integer)
+    fig = Figure(size=(1000, 500))
+    ax = Axis(fig[1, 1], xlabel="t", ylabel="energy density",
+        title="live energy trajectory")
+    full_times = Observable(Float64[])
+    full_energies = Observable(Float64[])
+    window_times = Observable(Float64[])
+    window_energies = Observable(Float64[])
+    lines!(ax, full_times, full_energies, color=(:gray, 0.35), linewidth=1.5)
+    lines!(ax, window_times, window_energies, color=:dodgerblue, linewidth=3)
+    display(fig)
+    return (; full_times, full_energies, window_times, window_energies, window_blocks)
+end
+
+function update_live_energy_plot!(plot, times::AbstractVector{<:Real},
+        energies::AbstractVector{<:Real})
+    plot.full_times[] = collect(times)
+    plot.full_energies[] = collect(energies)
+    start = max(1, length(times) - plot.window_blocks + 1)
+    plot.window_times[] = collect(times[start:end])
+    plot.window_energies[] = collect(energies[start:end])
+    yield()
+    return nothing
 end
 
 function main()
@@ -68,8 +97,12 @@ function main()
     ntr = args["ntrajectories"]
     seeds = collect(args["seed"]:(args["seed"] + ntr - 1))
     fit_rmax = isfinite(config.fit_rmax) ? config.fit_rmax : L / 3
+    block_time = args["block-steps"] * config.dt
+    live_window_blocks = equilibrium_window_blocks(
+        block_time, args["live-energy-window-time"], 1)
+    live_plot = start_live_energy_plot(live_window_blocks)
 
-    times = collect(1:nblocks) .* args["block-steps"] .* config.dt
+    times = collect(1:nblocks) .* block_time
     energies = zeros(Float64, nblocks, ntr)
     mags = zeros(Float64, nblocks, ntr)
     etas = fill(NaN, nblocks, ntr)
@@ -80,14 +113,23 @@ function main()
         rng = MersenneTwister(seed)
         theta0 = initial_angles(rng, L, config.initial_condition)
         sol = LatticeFlockingSDE.solve_one(theta0, config; seed)
+        live_times = Float64[]
+        live_energies = Float64[]
+
+        @info "live energy trajectory" trajectory=j ntrajectories=ntr
 
         for (i, state) in enumerate(sol.u)
             theta = wrap_angles!(collect(state))
-            energies[i, j] = xy_energy(theta, params) / L^2
+            energy_density = xy_energy(theta, params) / L^2
+            energies[i, j] = energy_density
             mags[i, j] = magnetization(theta)
             r, c, _ = radial_correlation(theta, L)
             fit = fit_power_law(r, c; rmin=config.fit_rmin, rmax=fit_rmax)
             etas[i, j] = fit.eta
+
+            push!(live_times, times[i])
+            push!(live_energies, energy_density)
+            update_live_energy_plot!(live_plot, live_times, live_energies)
 
             if correlations === nothing
                 radii = r
