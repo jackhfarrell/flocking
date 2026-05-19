@@ -1,0 +1,4 @@
+saved: results/snapshot_dataset_up.jld2
+times: [0.0, 25.0, 50.0, 75.0]
+theta_snapshots size: (200, 200, 4)
+block arrow size: (20, 20, 4)

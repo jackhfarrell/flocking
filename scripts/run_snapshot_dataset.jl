@@ -10,7 +10,7 @@ include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
 
 settings = ArgParseSettings(
-    description="Save four angle-field snapshots from a smooth right-pointing perturbation.",
+    description="Save four angle-field snapshots with right-pointing background and an upward circular perturbation.", 
 )
 @add_arg_table! settings begin
     "--L"
@@ -86,7 +86,7 @@ all(t -> t >= 0, times) || throw(ArgumentError("snapshot times must be nonnegati
 
 params = ModelParams(; L, Q, J, v)
 rng = MersenneTwister(seed)
-theta0 = random_angles(rng, L)
+theta0 = zeros(Float64, L * L)  # background: all spins pointing right (θ = 0)
 twoπ = 2π
 
 @inbounds for y in 1:L, x in 1:L
@@ -95,8 +95,9 @@ twoπ = 2π
     dy = y - center_y
     r = sqrt(dx^2 + dy^2)
     weight = 0.5 * (1 - tanh((r - radius) / transition_width))
-    c = (1 - weight) * cos(theta0[idx]) + weight
-    s = (1 - weight) * sin(theta0[idx])
+    # blend from background (θ=0) toward upward pointing (θ=π/2) inside the circle
+    c = (1 - weight) * cos(theta0[idx]) + weight * cos(pi/2)
+    s = (1 - weight) * sin(theta0[idx]) + weight * sin(pi/2)
     theta0[idx] = mod(atan(s, c), twoπ)
 end
 
@@ -151,7 +152,7 @@ metadata = (;
     radius,
     transition_width,
     block_size,
-    initialization=:smooth_right_pointing_circular_perturbation,
+    initialization=:right_background_upward_circular_perturbation,
 )
 dataset = (;
     params,

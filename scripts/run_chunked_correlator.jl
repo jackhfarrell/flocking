@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
 
 L = 32
-gamma = 1.0
+gamma = 0.05
 J = 2.0
 v = 1.0
 dt = 0.005

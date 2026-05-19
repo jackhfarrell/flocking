@@ -52,6 +52,23 @@ Useful subfolders are `lowT_J2/`, `kt_J1p11982/`, `dt_scan/`, and
 julia --project=. scripts/plot_results.jl results/passive_L32.jld2 --output-dir figures/passive_L32
 ```
 
+## Snapshot movie
+
+```bash
+julia --project=. scripts/run_snapshot_movie.jl --J 1.1 --Q 1e-4 --output figures/snapshot_dataset/snapshot_movie.mp4
+```
+
+By default the movie starts from a uniform background and seeds the circular
+perturbation immediately. If you set `--equilibration-time` to a positive value,
+the script first evolves the background and then inserts the perturbation into
+that already-fluctuating state.
+
+One important detail: in this model `Q` is not a standalone "noise knob". It
+appears in both the passive drift and the stochastic term, so changing `Q`
+mainly rescales the passive relaxation timescale. If you want a visually clean
+uniform background, keep `--equilibration-time 0` rather than expecting smaller
+`Q` alone to suppress fluctuations.
+
 ## Tests
 
 ```bash

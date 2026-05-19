@@ -18,7 +18,7 @@ function parse_args()
             default = 32
         "--Q"
             arg_type = Float64
-            default = 1.0
+            default = 0.05
         "--J"
             arg_type = Float64
             default = 2.0

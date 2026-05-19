@@ -15,13 +15,13 @@
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
-mkdir -p logs/spin_aligned_f_L200 results/spin_aligned_f_correlator_L200_J2_v1_gamma1
+mkdir -p logs/spin_aligned_f_L200 results/spin_aligned_f_correlator_L200_J2_v2_gamma1
 
 julia --project=. scripts/run_spin_aligned_f_correlator_cluster.jl \
     --L 200 \
     --gamma 1 \
     --J 2 \
-    --v 1 \
+    --v 2 \
     --dt 0.001 \
     --burnin-time 100 \
     --T-max 16 \
@@ -30,4 +30,4 @@ julia --project=. scripts/run_spin_aligned_f_correlator_cluster.jl \
     --array-count 500 \
     --burnin-log-time 1.0 \
     --window-log-every 1 \
-    --output-dir results/spin_aligned_f_correlator_L200_J2_v1_gamma1
+    --output-dir results/spin_aligned_f_correlator_L200_J2_v2_gamma1

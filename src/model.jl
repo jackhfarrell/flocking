@@ -106,7 +106,7 @@ function drift!(du::AbstractVector{Float64}, theta::AbstractVector{<:Real}, work
         active_x = cos(θc) * (mu[xp] - mu[xm]) + cos(θxp) * mu[xp] - cos(θxm) * mu[xm]
         active_y = sin(θc) * (mu[yp] - mu[ym]) + sin(θyp) * mu[yp] - sin(θym) * mu[ym]
 
-        du[c] = passive + vhalf * (active_gradient + active_x + active_y)
+        du[c] = passive - vhalf * (active_gradient + active_x + active_y)
     end
     return du
 end
