@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
+#SBATCH --job-name=spinF_jv_sweep
+#SBATCH --account=ucb792_asc1
+#SBATCH --partition=amilan
+#SBATCH --qos=normal
+#SBATCH --time=00:10:00
+#SBATCH --output=logs/spin_aligned_f_L200_gamma1_jv_sweep_launcher/%j.out
+#SBATCH --error=logs/spin_aligned_f_L200_gamma1_jv_sweep_launcher/%j.err
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-dry_run=1
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    dry_run=0
+else
+    dry_run=1
+fi
 max_points=25
 
 while (($# > 0)); do
@@ -47,13 +58,14 @@ window_log_every=1
 script="scripts/submit_spin_aligned_f_correlator_point.sh"
 root_results="results/spin_aligned_f_correlator_L200_gamma1_jv_sweep"
 root_logs="logs/spin_aligned_f_L200_gamma1_jv_sweep"
+launcher_logs="logs/spin_aligned_f_L200_gamma1_jv_sweep_launcher"
 
 j_values=(0.1 0.31622776601683794 1.0 3.1622776601683795 10.0)
 j_tags=(0p1 0p316227766 1 3p16227766 10)
 v_values=(0.1 0.31622776601683794 1.0 3.1622776601683795 10.0)
 v_tags=(0p1 0p316227766 1 3p16227766 10)
 
-mkdir -p "$root_results" "$root_logs"
+mkdir -p "$root_results" "$root_logs" "$launcher_logs"
 
 count=0
 for j_idx in "${!j_values[@]}"; do
