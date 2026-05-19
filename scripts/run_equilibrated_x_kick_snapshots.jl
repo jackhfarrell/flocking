@@ -24,7 +24,7 @@ settings = ArgParseSettings(
         default = 2.0
     "--v"
         arg_type = Float64
-        default = 2.0
+        default = 10.0
     "--dt"
         arg_type = Float64
         default = 0.01
@@ -33,7 +33,7 @@ settings = ArgParseSettings(
         default = 50.0
     "--rotation-fraction"
         arg_type = Float64
-        default = 0.2
+        default = 0.5
     "--seed"
         arg_type = Int
         default = 1
