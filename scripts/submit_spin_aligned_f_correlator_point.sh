@@ -14,7 +14,9 @@
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="${SLURM_SUBMIT_DIR:-$(cd "${script_dir}/.." && pwd)}"
+cd "${repo_root}"
 
 L="${L:-200}"
 GAMMA="${GAMMA:-1}"

@@ -9,7 +9,9 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="${SLURM_SUBMIT_DIR:-$(cd "${script_dir}/.." && pwd)}"
+cd "${repo_root}"
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     dry_run=0
