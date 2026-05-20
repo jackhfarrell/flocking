@@ -6,10 +6,12 @@ The implemented convention is
 
 ```text
 d theta_r = drift_r(theta) dt + sqrt(Q) dW_r
-drift_r = -(Q/2) mu_r + active_v_terms
+drift_r = -(Q/2) mu_r - (v/2) active_terms(theta, mu)
 ```
 
 with white noise correlation `<xi(r,t) xi(r',t')> = Q delta_rr' delta(t-t')`.
+Positive `v` therefore follows the current sign convention implemented in
+`src/model.jl`.
 
 ## Setup
 
@@ -55,7 +57,8 @@ julia --project=. scripts/plot_results.jl results/passive_L32.jld2 --output-dir 
 ## Snapshot movie
 
 ```bash
-julia --project=. scripts/run_snapshot_movie.jl --J 1.1 --Q 1e-4 --output figures/snapshot_dataset/snapshot_movie.mp4
+julia --project=. scripts/run_snapshot_movie.jl --J 1.1 --Q 1e-4 --dt 0.001953125 \
+  --output figures/snapshot_dataset/snapshot_movie.mp4
 ```
 
 By default the movie starts from a uniform background and seeds the circular
@@ -67,7 +70,9 @@ One important detail: in this model `Q` is not a standalone "noise knob". It
 appears in both the passive drift and the stochastic term, so changing `Q`
 mainly rescales the passive relaxation timescale. If you want a visually clean
 uniform background, keep `--equilibration-time 0` rather than expecting smaller
-`Q` alone to suppress fluctuations.
+`Q` alone to suppress fluctuations. Low `Q` also does not fix active snapshot
+artifacts when the fixed timestep is too large; for `v ≈ 2`, use a small step
+such as `dt = 2^-9` or `2^-10`.
 
 ## Tests
 

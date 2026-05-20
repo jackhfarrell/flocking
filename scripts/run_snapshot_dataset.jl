@@ -9,6 +9,10 @@ using StochasticDiffEq
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
 
+# Active snapshot demos need a smaller fixed step than the passive scripts.
+const DEFAULT_ACTIVE_SNAPSHOT_DT = 2.0^-9
+const DEFAULT_SNAPSHOT_TIME_FRACTIONS = (0.0, 0.25, 0.5, 0.75)
+
 settings = ArgParseSettings(
     description="Save four angle-field snapshots with right-pointing background and an upward circular perturbation.", 
 )
@@ -27,7 +31,7 @@ settings = ArgParseSettings(
         default = 2.0
     "--dt"
         arg_type = Float64
-        default = 0.01
+        default = DEFAULT_ACTIVE_SNAPSHOT_DT
     "--seed"
         arg_type = Int
         default = 1
@@ -76,7 +80,8 @@ transition_width > 0 || throw(ArgumentError("transition-width must be positive")
 
 times = if isempty(args["times"])
     v > 0 || throw(ArgumentError("v must be positive when --times is omitted"))
-    [0.0, L / (4v), L / (2v), 3L / (4v)]
+    advection_time = L / v
+    [fraction * advection_time for fraction in DEFAULT_SNAPSHOT_TIME_FRACTIONS]
 else
     parsed = parse.(Float64, split(args["times"], ","))
     length(parsed) == 4 || throw(ArgumentError("--times must contain exactly four comma-separated values"))
@@ -152,6 +157,8 @@ metadata = (;
     radius,
     transition_width,
     block_size,
+    default_dt=DEFAULT_ACTIVE_SNAPSHOT_DT,
+    default_time_fractions=collect(DEFAULT_SNAPSHOT_TIME_FRACTIONS),
     initialization=:right_background_upward_circular_perturbation,
 )
 dataset = (;

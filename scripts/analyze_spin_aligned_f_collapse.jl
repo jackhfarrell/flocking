@@ -31,7 +31,13 @@ function parse_args()
             default = DEFAULT_PREFIX
         "--radius-max"
             arg_type = Float64
-            default = 40.0
+            default = 80.0
+        "--radius-min"
+            arg_type = Float64
+            default = 0.0
+        "--time-min"
+            arg_type = Float64
+            default = 0.0
         "--poly-order"
             arg_type = Int
             default = 3
@@ -70,14 +76,16 @@ function parse_args()
 end
 
 function write_summary(path::String, ensemble, radius_max::Real, time_indices::AbstractVector{Int},
-        coarse_best, fine_best, band, feature, args)
+        coarse_best, fine_best, band, collapse_unc, feature, args)
     mkpath(dirname(path))
     open(path, "w") do io
         println(io, "# Spin-aligned F(r,t) collapse analysis")
         println(io)
         println(io, "- Input directory: `", args["input-dir"], "`")
         println(io, "- Number of runs: ", ensemble.nruns)
-        println(io, "- Radius cutoff: `r <= ", @sprintf("%.1f", radius_max), "`")
+        println(io, "- Radius window: `", @sprintf("%.1f", args["radius-min"]),
+            " <= r <= ", @sprintf("%.1f", radius_max), "`")
+        println(io, "- Time cutoff: `t >= ", @sprintf("%.1f", args["time-min"]), "`")
         included_times = [@sprintf("%.3g", ensemble.times[i]) for i in time_indices]
         println(io, "- Included times: `", join(included_times, ", "), "`")
         println(io, "- Polynomial order: `", args["poly-order"], "`")
@@ -91,6 +99,10 @@ function write_summary(path::String, ensemble, radius_max::Real, time_indices::A
         println(io, "- Refined best fit: `eta_F = ", @sprintf("%.4f", fine_best.eta),
             "`, `zeta = ", @sprintf("%.4f", fine_best.zeta),
             "`, reduced `chi^2 = ", @sprintf("%.4f", fine_best.reduced_chi2), "`")
+        println(io, "- Collapse uncertainty from sensitivity band: `eta_F = ",
+            @sprintf("%.4f ± %.4f", collapse_unc.eta_center, collapse_unc.eta_halfwidth),
+            "`, `zeta = ", @sprintf("%.4f ± %.4f",
+            collapse_unc.zeta_center, collapse_unc.zeta_halfwidth), "`")
         println(io, "- Smooth master curve: weighted polynomial of order `",
             args["poly-order"], "` fit after exponent selection")
         println(io, "- Shared collapsed window: `x in [", @sprintf("%.4f", fine_best.overlap_min),
@@ -104,9 +116,9 @@ function write_summary(path::String, ensemble, radius_max::Real, time_indices::A
         println(io, "## Feature-based sanity check")
         println(io)
         println(io, "- Trough-position scaling: `r_min(t) ~ t^zeta`, fitted `zeta = ",
-            @sprintf("%.4f", feature.zeta), "`")
+            @sprintf("%.4f ± %.4f", feature.zeta, feature.zeta_stderr), "`")
         println(io, "- Trough-amplitude scaling: `-F_min(t) ~ t^{-eta_F}`, fitted `eta_F = ",
-            @sprintf("%.4f", feature.eta), "`")
+            @sprintf("%.4f ± %.4f", feature.eta, feature.eta_stderr), "`")
         println(io)
         println(io, "## Comparison")
         println(io)
@@ -129,6 +141,9 @@ end
 function main()
     args = parse_args()
     args["radius-max"] > 0 || throw(ArgumentError("--radius-max must be positive"))
+    args["radius-min"] >= 0 || throw(ArgumentError("--radius-min must be nonnegative"))
+    args["radius-min"] < args["radius-max"] ||
+        throw(ArgumentError("--radius-min must be smaller than --radius-max"))
     args["poly-order"] >= 0 || throw(ArgumentError("--poly-order must be nonnegative"))
     args["collapse-bins"] >= 2 || throw(ArgumentError("--collapse-bins must be at least 2"))
     args["eta-step"] > 0 || throw(ArgumentError("--eta-step must be positive"))
@@ -140,9 +155,9 @@ function main()
 
     files = collect_job_files(args["input-dir"])
     ensemble = load_ensemble(files)
-    radius_mask = ensemble.radii .<= args["radius-max"]
-    any(radius_mask) || error("no radii satisfy r <= $(args["radius-max"])")
-    time_indices = findall(>(0), ensemble.times)
+    radius_mask = (ensemble.radii .>= args["radius-min"]) .& (ensemble.radii .<= args["radius-max"])
+    any(radius_mask) || error("no radii satisfy $(args["radius-min"]) <= r <= $(args["radius-max"])")
+    time_indices = findall(t -> t > 0 && t >= args["time-min"], ensemble.times)
     isempty(time_indices) && error("no positive times available for collapse analysis")
 
     eta_values = collect(args["eta-min"]:args["eta-step"]:args["eta-max"])
@@ -161,6 +176,7 @@ function main()
 
     band = sensitivity_band(fine_objective, fine_eta_values, fine_zeta_values,
         args["sensitivity-factor"])
+    collapse_unc = band_summary(band, fine_eta_values, fine_zeta_values)
     feature = feature_estimate(ensemble.radii, ensemble.times, ensemble.F_mean,
         radius_mask, time_indices)
 
@@ -181,13 +197,14 @@ function main()
         fine_objective, fine_best, band)
     plot_feature_diagnostics(feature_plot, feature)
     write_summary(summary_path, ensemble, args["radius-max"], time_indices,
-        coarse_best, fine_best, band, feature, args)
+        coarse_best, fine_best, band, collapse_unc, feature, args)
 
     result = (;
         config=ensemble.config,
         input_dir=args["input-dir"],
         files,
         nruns=ensemble.nruns,
+        radius_min=args["radius-min"],
         radius_max=args["radius-max"],
         poly_order=args["poly-order"],
         collapse_bins=args["collapse-bins"],
@@ -205,6 +222,7 @@ function main()
         coarse_best,
         fine_best,
         sensitivity_band=band,
+        collapse_uncertainty=collapse_unc,
         feature,
     )
     jldsave(archive_path; result)
@@ -219,8 +237,11 @@ function main()
         coarse_best.eta, coarse_best.zeta, coarse_best.reduced_chi2))
     println(@sprintf("refined best: eta_F = %.4f, zeta = %.4f, reduced chi^2 = %.4f",
         fine_best.eta, fine_best.zeta, fine_best.reduced_chi2))
-    println(@sprintf("feature estimates: eta_F = %.4f, zeta = %.4f",
-        feature.eta, feature.zeta))
+    println(@sprintf("collapse uncertainty: eta_F = %.4f ± %.4f, zeta = %.4f ± %.4f",
+        collapse_unc.eta_center, collapse_unc.eta_halfwidth,
+        collapse_unc.zeta_center, collapse_unc.zeta_halfwidth))
+    println(@sprintf("feature estimates: eta_F = %.4f ± %.4f, zeta = %.4f ± %.4f",
+        feature.eta, feature.eta_stderr, feature.zeta, feature.zeta_stderr))
 end
 
 main()

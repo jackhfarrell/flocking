@@ -5,22 +5,22 @@
 - J: `10`
 - v: `1`
 - Number of runs: 20
-- Radius cutoff: `r <= 40.0`
+- Radius cutoff: `r <= 80.0`
 - Included times: `2, 4, 6, 8, 10, 12, 14, 16`
 - Classification: `collapse accepted`
 
 ## Collapse fit
 
-- Coarse best: `eta_F = 0.3000`, `zeta = 0.4400`, reduced `chi^2 = 0.8295`
-- Refined best: `eta_F = 0.2950`, `zeta = 0.4250`, reduced `chi^2 = 0.7679`
-- Shared collapsed window: `x in [0.7448, 12.3114]`
-- Sensitivity band: `eta_F in [0.2850, 0.3050]`, `zeta in [0.4250, 0.4250]`
+- Coarse best: `eta_F = 0.3000`, `zeta = 0.4200`, reduced `chi^2 = 1.3668`
+- Refined best: `eta_F = 0.2950`, `zeta = 0.4200`, reduced `chi^2 = 1.3634`
+- Shared collapsed window: `x in [0.7474, 24.9666]`
+- Sensitivity band: `eta_F in [0.2700, 0.3150]`, `zeta in [0.4000, 0.4250]`
 
 ## Feature check
 
 - Trough-position `zeta = 0.4127`
 - Trough-amplitude `eta_F = 0.2970`
-- Feature disagreement: `Δeta_F = 0.0020`, `Δzeta = 0.0123`
+- Feature disagreement: `Δeta_F = 0.0020`, `Δzeta = 0.0073`
 
 ## Assessment
 
@@ -28,5 +28,4 @@
 
 ## Warnings
 
-- eta_F optimum pinned to sensitivity-band edge
 - zeta optimum pinned to sensitivity-band edge

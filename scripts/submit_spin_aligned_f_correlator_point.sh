@@ -18,11 +18,23 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="${SLURM_SUBMIT_DIR:-$(cd "${script_dir}/.." && pwd)}"
 cd "${repo_root}"
 
+if ! command -v julia >/dev/null 2>&1; then
+    if type module >/dev/null 2>&1; then
+        module load julia
+    fi
+fi
+
+command -v julia >/dev/null 2>&1 || {
+    echo "julia is not available; load the Julia module or set JULIA_BIN before submitting" >&2
+    exit 1
+}
+
 L="${L:-200}"
 GAMMA="${GAMMA:-1}"
 J_VALUE="${J_VALUE:?set J_VALUE}"
 V_VALUE="${V_VALUE:?set V_VALUE}"
 DT="${DT:-0.001}"
+DR="${DR:-0.25}"
 BURNIN_TIME="${BURNIN_TIME:-100}"
 T_MAX="${T_MAX:-16}"
 NTIMES="${NTIMES:-8}"
@@ -40,6 +52,7 @@ julia --project=. scripts/run_spin_aligned_f_correlator_cluster.jl \
     --J "${J_VALUE}" \
     --v "${V_VALUE}" \
     --dt "${DT}" \
+    --dr "${DR}" \
     --burnin-time "${BURNIN_TIME}" \
     --T-max "${T_MAX}" \
     --ntimes "${NTIMES}" \

@@ -33,9 +33,12 @@ function parse_args()
         "--dt"
             arg_type = Float64
             default = 0.001
+        "--dr"
+            arg_type = Float64
+            default = 0.25
         "--burnin-time"
             arg_type = Float64
-            default = 100.0
+            default = 1000.0
         "--T-max"
             arg_type = Float64
             default = 16.0
@@ -199,8 +202,68 @@ function spin_aligned_f_correlator(window::AbstractVector, params::ModelParams,
     return F
 end
 
+function spin_aligned_correlators(window::AbstractVector, params::ModelParams,
+        radii::AbstractVector)
+    L = params.L
+    nsites = L * L
+    isodd(length(window)) || throw(ArgumentError("window length must be odd"))
+    all(length(state) == nsites for state in window) ||
+        throw(DimensionMismatch("each window state must have length L^2"))
+
+    ntimes = length(window) ÷ 2
+    mid = ntimes + 1
+    cos_window = [cos.(state) for state in window]
+    sin_window = [sin.(state) for state in window]
+    cos_mid = cos_window[mid]
+    sin_mid = sin_window[mid]
+    F = zeros(Float64, length(radii), ntimes + 1)
+    C_plus = zeros(Float64, length(radii), ntimes + 1)
+    C_minus = zeros(Float64, length(radii), ntimes + 1)
+
+    @inbounds for (ridx, r) in enumerate(radii)
+        for lag in 0:ntimes
+            cos_minus = cos_window[mid - lag]
+            sin_minus = sin_window[mid - lag]
+            cos_plus = cos_window[mid + lag]
+            sin_plus = sin_window[mid + lag]
+            accum_f = 0.0
+            accum_c_plus = 0.0
+            accum_c_minus = 0.0
+
+            for y in 1:L, x in 1:L
+                center = site_index(x, y, L)
+                cx = cos_mid[center]
+                sy = sin_mid[center]
+                dx = r * cx
+                dy = r * sy
+
+                forward_plus = interpolated_spin_dot(cos_plus, sin_plus, L,
+                    x + dx, y + dy, cx, sy)
+                backward_minus = interpolated_spin_dot(cos_minus, sin_minus, L,
+                    x - dx, y - dy, cx, sy)
+                forward_minus = interpolated_spin_dot(cos_minus, sin_minus, L,
+                    x + dx, y + dy, cx, sy)
+                backward_plus = interpolated_spin_dot(cos_plus, sin_plus, L,
+                    x - dx, y - dy, cx, sy)
+
+                accum_f += 0.25 * (forward_plus + backward_minus -
+                    forward_minus - backward_plus)
+                accum_c_plus += 0.5 * (forward_plus + backward_plus)
+                accum_c_minus += 0.5 * (forward_minus + backward_minus)
+            end
+
+            F[ridx, lag + 1] = accum_f / nsites
+            C_plus[ridx, lag + 1] = accum_c_plus / nsites
+            C_minus[ridx, lag + 1] = accum_c_minus / nsites
+        end
+    end
+
+    return (; F, C_plus, C_minus)
+end
+
 function validate_args!(args, array_id::Integer)
     args["dt"] > 0 || throw(ArgumentError("--dt must be positive"))
+    args["dr"] > 0 || throw(ArgumentError("--dr must be positive"))
     args["burnin-time"] >= 0 || throw(ArgumentError("--burnin-time must be nonnegative"))
     args["T-max"] > 0 || throw(ArgumentError("--T-max must be positive"))
     args["ntimes"] > 0 || throw(ArgumentError("--ntimes must be positive"))
@@ -223,6 +286,7 @@ function main()
     L = args["L"]
     gamma = args["gamma"]
     dt = args["dt"]
+    dr = args["dr"]
     ntimes = args["ntimes"]
     nchunks = args["nchunks"]
     lag_time = args["T-max"] / ntimes
@@ -238,7 +302,8 @@ function main()
     work = LatticeFlockingSDE.DriftWorkspace(params)
     solver = SRIW1()
 
-    radii = collect(1.0:(L ÷ 2))
+    dr <= L / 2 || throw(ArgumentError("--dr must be at most L / 2"))
+    radii = collect(dr:dr:(L / 2))
     times = collect(0:ntimes) .* lag_steps .* dt
     log_radius_index = args["log-radius-index"]
     log_time_index = args["log-time-index"] == 0 ? ntimes + 1 : args["log-time-index"]
@@ -255,6 +320,7 @@ function main()
         :J => params.J,
         :v => params.v,
         :dt => dt,
+        :dr => dr,
         :burnin_time => args["burnin-time"],
         :burnin_steps => burnin_steps,
         :T_max => args["T-max"],
@@ -282,6 +348,12 @@ function main()
     F_mean = zeros(Float64, length(radii), ntimes + 1)
     F_m2 = zeros(Float64, length(radii), ntimes + 1)
     F_stderr = zeros(Float64, length(radii), ntimes + 1)
+    C_plus_mean = zeros(Float64, length(radii), ntimes + 1)
+    C_plus_m2 = zeros(Float64, length(radii), ntimes + 1)
+    C_plus_stderr = zeros(Float64, length(radii), ntimes + 1)
+    C_minus_mean = zeros(Float64, length(radii), ntimes + 1)
+    C_minus_m2 = zeros(Float64, length(radii), ntimes + 1)
+    C_minus_stderr = zeros(Float64, length(radii), ntimes + 1)
 
     for chunk in 1:nchunks
         window = Vector{Vector{Float64}}(undef, 2ntimes + 1)
@@ -305,22 +377,30 @@ function main()
             end
         end
 
-        loginfo("computing spin-aligned F chunk",
+        loginfo("computing spin-aligned correlator chunk",
             :array_id => array_id,
             :chunk => chunk,
             :nchunks => nchunks,
             :nradii => length(radii),
             :ntimes => ntimes)
-        F_chunk = spin_aligned_f_correlator(window, params, radii)
-        F_stderr = online_mean_stderr!(F_mean, F_m2, F_chunk, chunk)
-        loginfo("rolling spin-aligned F",
+        correlators = spin_aligned_correlators(window, params, radii)
+        F_stderr = online_mean_stderr!(F_mean, F_m2, correlators.F, chunk)
+        C_plus_stderr = online_mean_stderr!(C_plus_mean, C_plus_m2,
+            correlators.C_plus, chunk)
+        C_minus_stderr = online_mean_stderr!(C_minus_mean, C_minus_m2,
+            correlators.C_minus, chunk)
+        loginfo("rolling spin-aligned correlators",
             :array_id => array_id,
             :chunk => chunk,
             :nchunks => nchunks,
             :radius => radii[log_radius_index],
             :lag => times[log_time_index],
             :F => F_mean[log_radius_index, log_time_index],
-            :stderr => F_stderr[log_radius_index, log_time_index])
+            :C_plus => C_plus_mean[log_radius_index, log_time_index],
+            :C_minus => C_minus_mean[log_radius_index, log_time_index],
+            :stderr_F => F_stderr[log_radius_index, log_time_index],
+            :stderr_C_plus => C_plus_stderr[log_radius_index, log_time_index],
+            :stderr_C_minus => C_minus_stderr[log_radius_index, log_time_index])
     end
 
     config = (;
@@ -330,6 +410,7 @@ function main()
         J=params.J,
         v=params.v,
         dt,
+        dr,
         burnin_time=args["burnin-time"],
         burnin_steps,
         T_max=args["T-max"],
@@ -349,7 +430,8 @@ function main()
         log_time_index,
         output,
     )
-    result = (; config, radii, times, F_mean, F_stderr)
+    result = (; config, radii, times, F_mean, F_stderr, C_plus_mean, C_plus_stderr,
+        C_minus_mean, C_minus_stderr)
 
     mkpath(dirname(output))
     loginfo("saving headless spin-aligned F correlator",

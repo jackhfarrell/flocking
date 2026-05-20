@@ -5,30 +5,31 @@
 - J: `0.1`
 - v: `3.16227766`
 - Number of runs: 20
-- Radius cutoff: `r <= 40.0`
+- Radius cutoff: `r <= 80.0`
 - Included times: `2, 4, 6, 8, 10, 12, 14, 16`
 - Classification: `no clear scaling phase`
 
 ## Collapse fit
 
-- Coarse best: `eta_F = 0.7600`, `zeta = 0.6400`, reduced `chi^2 = 0.8260`
-- Refined best: `eta_F = 0.7550`, `zeta = 0.6400`, reduced `chi^2 = 0.8260`
-- Shared collapsed window: `x in [0.6417, 6.7830]`
-- Sensitivity band: `eta_F in [0.7000, 0.8200]`, `zeta in [0.6400, 0.6400]`
+- Coarse best: `eta_F = 0.8000`, `zeta = 0.6400`, reduced `chi^2 = 0.9018`
+- Refined best: `eta_F = 0.8600`, `zeta = 0.6850`, reduced `chi^2 = 0.8876`
+- Shared collapsed window: `x in [0.6220, 11.9748]`
+- Sensitivity band: `eta_F in [0.7400, 0.8600]`, `zeta in [0.6150, 0.6950]`
 
 ## Feature check
 
-- Trough-position `zeta = 1.5660`
-- Trough-amplitude `eta_F = -0.0079`
-- Feature disagreement: `Δeta_F = 0.7629`, `Δzeta = 0.9260`
+- Trough-position `zeta = 0.9462`
+- Trough-amplitude `eta_F = 0.0106`
+- Feature disagreement: `Δeta_F = 0.8494`, `Δzeta = 0.2612`
 
 ## Assessment
 
 - Collapse rejected as `no clear scaling phase`.
 - J 0.100 < J_KT proxy 1.111
-- |eta_F - eta_feature| 0.763 > 0.150
-- |zeta - zeta_feature| 0.926 > 0.120
+- |eta_F - eta_feature| 0.849 > 0.150
+- |zeta - zeta_feature| 0.261 > 0.120
 
 ## Warnings
 
+- eta_F optimum pinned to sensitivity-band edge
 - zeta optimum pinned to sensitivity-band edge

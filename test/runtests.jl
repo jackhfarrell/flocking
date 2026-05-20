@@ -1,10 +1,42 @@
 using Test
 using Random
+using DifferentialEquations
 using StochasticDiffEq
 using JLD2
 
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
+
+const DEFAULT_ACTIVE_SNAPSHOT_DT = 2.0^-9
+
+function build_snapshot_theta0(L::Integer; center_x=L / 4, center_y=L / 2,
+        radius=L / 10, transition_width=L / 40, base_theta=nothing)
+    theta0 = isnothing(base_theta) ? zeros(Float64, L^2) : copy(base_theta)
+    twoπ = 2π
+    @inbounds for y in 1:L, x in 1:L
+        idx = site_index(x, y, L)
+        dx = x - center_x
+        dy = y - center_y
+        r = sqrt(dx^2 + dy^2)
+        weight = 0.5 * (1 - tanh((r - radius) / transition_width))
+        c = (1 - weight) * cos(theta0[idx]) + weight * cos(pi / 2)
+        s = (1 - weight) * sin(theta0[idx]) + weight * sin(pi / 2)
+        theta0[idx] = mod(atan(s, c), twoπ)
+    end
+    theta0
+end
+
+function positive_sin_marker_x(theta::AbstractVector{<:Real}, L::Integer)
+    theta_grid = reshape(theta, L, L)
+    num = 0.0
+    den = 0.0
+    @inbounds for y in 1:L, x in 1:L
+        weight = max(sin(theta_grid[x, y]), 0.0)
+        num += x * weight
+        den += weight
+    end
+    num / den
+end
 
 @testset "periodic indexing" begin
     @test site_index(1, 1, 4) == 1
@@ -157,6 +189,39 @@ end
     @test all(isfinite, F_mean)
 end
 
+@testset "snapshot perturbation drifts right" begin
+    L = 80
+    params = ModelParams(; L, Q=0.0, J=2.0, v=2.0)
+    theta0 = build_snapshot_theta0(L)
+    x0 = positive_sin_marker_x(theta0, L)
+    work = LatticeFlockingSDE.DriftWorkspace(params)
+    problem = ODEProblem(LatticeFlockingSDE.drift!, theta0, (0.0, 8.0), work)
+    solution = solve(problem, Tsit5(); saveat=[8.0], save_start=false)
+    x1 = positive_sin_marker_x(solution.u[end], L)
+
+    @test x1 > x0 + 8
+end
+
+@testset "snapshot timestep smoke" begin
+    L = 48
+    params = ModelParams(; L, Q=1e-4, J=2.0, v=2.0)
+    theta0 = build_snapshot_theta0(L)
+    work = LatticeFlockingSDE.DriftWorkspace(params)
+    times = [0.0, 1.0, 2.0]
+    problem = SDEProblem(LatticeFlockingSDE.drift!, LatticeFlockingSDE.noise!,
+        theta0, (0.0, last(times)), work)
+    solution = solve(problem, EM(); dt=DEFAULT_ACTIVE_SNAPSHOT_DT, adaptive=false,
+        saveat=times, save_start=true, seed=17)
+
+    @test length(solution.u) == length(times)
+    for state in solution.u
+        @test all(isfinite, state)
+        m = magnetization(state)
+        @test isfinite(m)
+        @test 0.2 <= m <= 1.0
+    end
+end
+
 @testset "small smoke run" begin
     config = SimulationConfig(; L=8, Q=0.1, J=1.5, v=0.0, dt=0.001,
         burnin_steps=2, sample_stride=1, nsamples=2, ntrajectories=1, seed=11,
@@ -200,4 +265,34 @@ end
     @test result.equilibrium_steps == 1
     @test size(result.F_mean) == (3, 2)
     @test size(result.F_stderr) == (3, 2)
+end
+
+@testset "spin-aligned correlator script smoke" begin
+    output = tempname() * ".jld2"
+    figure = tempname() * ".png"
+    script = joinpath(@__DIR__, "..", "scripts", "run_spin_aligned_f_correlator.jl")
+    project = joinpath(@__DIR__, "..")
+    dr = 0.5
+
+    run(`$(Base.julia_cmd()) --project=$project $script --L 6 --gamma 0.0 --J 1.0 --v 1.0 --dt 0.001 --dr $dr --burnin-time 0.0 --T-max 1 --ntimes 1 --nwindows 1 --seed 2 --burnin-log-time 1.0 --window-log-every 1 --output $output --figure $figure`)
+
+    loaded = JLD2.load(output)
+    @test haskey(loaded, "result")
+    result = loaded["result"]
+    @test result.config.dr == dr
+    @test length(result.radii) == 6
+    @test size(result.F_mean, 1) == length(result.radii)
+    @test size(result.C_plus_mean) == size(result.F_mean)
+    @test size(result.C_minus_mean) == size(result.F_mean)
+    @test size(result.C_plus_stderr) == size(result.F_mean)
+    @test size(result.C_minus_stderr) == size(result.F_mean)
+end
+
+@testset "spin-aligned correlator rejects invalid dr" begin
+    script = joinpath(@__DIR__, "..", "scripts", "run_spin_aligned_f_correlator.jl")
+    project = joinpath(@__DIR__, "..")
+    output = tempname() * ".jld2"
+    figure = tempname() * ".png"
+    cmd = Cmd(`$(Base.julia_cmd()) --project=$project $script --L 6 --gamma 0.0 --J 1.0 --v 1.0 --dt 0.001 --dr 0.0 --burnin-time 0.0 --T-max 1 --ntimes 1 --nwindows 1 --seed 2 --burnin-log-time 1.0 --window-log-every 1 --output $output --figure $figure`; ignorestatus=true)
+    @test !success(cmd)
 end

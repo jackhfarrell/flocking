@@ -1,28 +1,30 @@
 # Spin-aligned F(r,t) collapse analysis
 
-- Input directory: `/Users/jfarrell/Desktop/flocking/results/spin_aligned_f_correlator_L200_J2_v1_gamma1`
+- Input directory: `results/spin_aligned_f_correlator_L200_J2_v1_gamma1`
 - Number of runs: 500
-- Radius cutoff: `r <= 40.0`
+- Radius window: `0.0 <= r <= 80.0`
+- Time cutoff: `t >= 0.0`
 - Included times: `2, 4, 6, 8, 10, 12, 14, 16`
 - Polynomial order: `3`
 - Collapse bins: `60`
 
 ## Primary collapse fit
 
-- Coarse best fit: `eta_F = 0.3200`, `zeta = 0.3800`, reduced `chi^2 = 46.4213`
-- Refined best fit: `eta_F = 0.3100`, `zeta = 0.3750`, reduced `chi^2 = 43.9147`
+- Coarse best fit: `eta_F = 0.3000`, `zeta = 0.3800`, reduced `chi^2 = 104.9916`
+- Refined best fit: `eta_F = 0.2950`, `zeta = 0.3900`, reduced `chi^2 = 103.6271`
+- Collapse uncertainty from sensitivity band: `eta_F = 0.2900 ± 0.0250`, `zeta = 0.3750 ± 0.0150`
 - Smooth master curve: weighted polynomial of order `3` fit after exponent selection
-- Shared collapsed window: `x in [0.7711, 14.1421]`
-- Sensitivity band (`objective <= 1.050 * min`): `eta_F in [0.3050, 0.3200]`, `zeta in [0.3750, 0.3900]`
+- Shared collapsed window: `x in [0.7631, 27.1321]`
+- Sensitivity band (`objective <= 1.050 * min`): `eta_F in [0.2650, 0.3150]`, `zeta in [0.3600, 0.3900]`
 
 ## Feature-based sanity check
 
-- Trough-position scaling: `r_min(t) ~ t^zeta`, fitted `zeta = 0.3816`
-- Trough-amplitude scaling: `-F_min(t) ~ t^{-eta_F}`, fitted `eta_F = 0.3228`
+- Trough-position scaling: `r_min(t) ~ t^zeta`, fitted `zeta = 0.3816 ± 0.0281`
+- Trough-amplitude scaling: `-F_min(t) ~ t^{-eta_F}`, fitted `eta_F = 0.3228 ± 0.0069`
 
 ## Comparison
 
-- Collapse minus feature estimate: `Δeta_F = -0.0128`, `Δzeta = -0.0066`
+- Collapse minus feature estimate: `Δeta_F = -0.0278`, `Δzeta = +0.0084`
 
 ## Trough data
 

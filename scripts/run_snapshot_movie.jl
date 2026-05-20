@@ -13,6 +13,9 @@ struct MovieWorkspace
     noise_scale::Float64
 end
 
+# Active snapshot demos need a smaller fixed step than the passive scripts.
+const DEFAULT_ACTIVE_SNAPSHOT_DT = 2.0^-9
+
 function movie_drift!(du, theta, work::MovieWorkspace, t)
     return LatticeFlockingSDE.drift!(du, theta, work.drift, t)
 end
@@ -42,7 +45,7 @@ settings = ArgParseSettings(
         default = 10.0
     "--dt"
         arg_type = Float64
-        default = 0.01
+        default = DEFAULT_ACTIVE_SNAPSHOT_DT
     "--tmax"
         arg_type = Float64
         default = 75.0

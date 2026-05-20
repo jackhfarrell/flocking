@@ -29,7 +29,7 @@ function parse_args()
             default = DEFAULT_FIGURES_ROOT
         "--radius-max"
             arg_type = Float64
-            default = 40.0
+            default = 80.0
         "--poly-order"
             arg_type = Int
             default = 3

@@ -54,12 +54,14 @@ burnin_time=100
 T_max=16
 ntimes=8
 nchunks=10
+dr=0.25
 burnin_log_time=1.0
 window_log_every=1
 
 script="scripts/submit_spin_aligned_f_correlator_point.sh"
-root_results="results/spin_aligned_f_correlator_L200_gamma1_jv_sweep"
-root_logs="logs/spin_aligned_f_L200_gamma1_jv_sweep"
+timestamp="$(date +"%Y%m%d_%H%M%S")"
+root_results="results/spin_aligned_f_correlator_L200_gamma1_jv_sweep_${timestamp}"
+root_logs="logs/spin_aligned_f_L200_gamma1_jv_sweep_${timestamp}"
 launcher_logs="logs/spin_aligned_f_L200_gamma1_jv_sweep_launcher"
 
 j_values=(0.1 0.31622776601683794 1.0 3.1622776601683795 10.0)
@@ -72,10 +74,10 @@ mkdir -p "$root_results" "$root_logs" "$launcher_logs"
 count=0
 for j_idx in "${!j_values[@]}"; do
     for v_idx in "${!v_values[@]}"; do
-        ((count += 1))
-        if ((count > max_points)); then
+        if (((count + 1) > max_points)); then
             break 2
         fi
+        ((count += 1))
 
         J_VALUE="${j_values[j_idx]}"
         J_TAG="${j_tags[j_idx]}"
@@ -90,11 +92,11 @@ for j_idx in "${!j_values[@]}"; do
 
         cmd=(
             sbatch
-            "--job-name=spinF_${point_name}"
+            "--job-name=spinF_${point_name}_${timestamp}"
             "--array=1-${array_count}"
             "--output=${log_dir}/%A_%a.out"
             "--error=${log_dir}/%A_%a.err"
-            "--export=ALL,L=${L},GAMMA=${gamma},J_VALUE=${J_VALUE},V_VALUE=${V_VALUE},DT=${dt},BURNIN_TIME=${burnin_time},T_MAX=${T_max},NTIMES=${ntimes},NCHUNKS=${nchunks},ARRAY_COUNT=${array_count},BURNIN_LOG_TIME=${burnin_log_time},WINDOW_LOG_EVERY=${window_log_every},OUTPUT_DIR=${output_dir}"
+            "--export=ALL,L=${L},GAMMA=${gamma},J_VALUE=${J_VALUE},V_VALUE=${V_VALUE},DT=${dt},DR=${dr},BURNIN_TIME=${burnin_time},T_MAX=${T_max},NTIMES=${ntimes},NCHUNKS=${nchunks},ARRAY_COUNT=${array_count},BURNIN_LOG_TIME=${burnin_log_time},WINDOW_LOG_EVERY=${window_log_every},OUTPUT_DIR=${output_dir}"
             "$script"
         )
 
