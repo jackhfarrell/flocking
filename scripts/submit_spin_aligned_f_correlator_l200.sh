@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
+#SBATCH --job-name=spinF_launch
+#SBATCH --account=ucb792_asc1
+#SBATCH --partition=amilan
+#SBATCH --qos=normal
+#SBATCH --time=00:05:00
+#SBATCH --output=logs/spin_aligned_f_L200_launcher/%j.out
+#SBATCH --error=logs/spin_aligned_f_L200_launcher/%j.err
 
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="${SLURM_SUBMIT_DIR:-$(cd "${script_dir}/.." && pwd)}"
 cd "${repo_root}"
+
+mkdir -p logs/spin_aligned_f_L200_launcher
 
 timestamp="$(date +"%Y%m%d_%H%M%S")"
 dataset_tag="spin_aligned_f_correlator_L200_J2_v1_gamma1_${timestamp}"
