@@ -12,30 +12,29 @@ const DEFAULT_ACTIVE_SNAPSHOT_DT = 2.0^-9
 function build_snapshot_theta0(L::Integer; center_x=L / 4, center_y=L / 2,
         radius=L / 10, transition_width=L / 40, base_theta=nothing)
     theta0 = isnothing(base_theta) ? zeros(Float64, L^2) : copy(base_theta)
-    twoπ = 2π
-    @inbounds for y in 1:L, x in 1:L
-        idx = site_index(x, y, L)
-        dx = x - center_x
-        dy = y - center_y
-        r = sqrt(dx^2 + dy^2)
-        weight = 0.5 * (1 - tanh((r - radius) / transition_width))
-        c = (1 - weight) * cos(theta0[idx]) + weight * cos(pi / 2)
-        s = (1 - weight) * sin(theta0[idx]) + weight * sin(pi / 2)
-        theta0[idx] = mod(atan(s, c), twoπ)
-    end
-    theta0
+    seed_upward_bump!(theta0, L; center_x, center_y, radius, transition_width)
+    return theta0
 end
 
-function positive_sin_marker_x(theta::AbstractVector{<:Real}, L::Integer)
-    theta_grid = reshape(theta, L, L)
-    num = 0.0
-    den = 0.0
-    @inbounds for y in 1:L, x in 1:L
-        weight = max(sin(theta_grid[x, y]), 0.0)
-        num += x * weight
-        den += weight
+function run_snapshot_dataset_script(; output, dt, Q, J=8.0, v=2.0, times=nothing, seed=2)
+    script = joinpath(@__DIR__, "..", "scripts", "run_snapshot_dataset.jl")
+    project = joinpath(@__DIR__, "..")
+    args = String[
+        "--L", "32",
+        "--Q", string(Q),
+        "--J", string(J),
+        "--v", string(v),
+        "--dt", string(dt),
+        "--seed", string(seed),
+        "--block-size", "4",
+        "--output", output,
+    ]
+    if !isnothing(times)
+        append!(args, ["--times", times])
     end
-    num / den
+    run(`$(Base.julia_cmd()) --project=$project $script $(args)`)
+    loaded = JLD2.load(output)
+    return loaded["dataset"]
 end
 
 @testset "periodic indexing" begin
@@ -222,6 +221,45 @@ end
     end
 end
 
+@testset "snapshot dataset script clean advection preset" begin
+    output = tempname() * ".jld2"
+    dataset = run_snapshot_dataset_script(output=output, dt=2.0^-10, Q=0.0)
+
+    @test length(dataset.times) == 4
+    @test length(dataset.x_centroids) == 4
+    @test all(isfinite, dataset.x_centroids)
+    @test dataset.metadata.calibrated_drift_speed > 0
+    @test issorted(dataset.x_centroids)
+    @test dataset.x_centroids[end] > dataset.x_centroids[1] + 2
+    @test size(dataset.theta_snapshots) == (32, 32, 4)
+end
+
+@testset "snapshot dataset script noisy high-J drift" begin
+    output = tempname() * ".jld2"
+    dataset = run_snapshot_dataset_script(output=output, dt=2.0^-10, Q=1e-4,
+        times="0,0.75,1.5,2.25", seed=5)
+
+    @test all(isfinite, dataset.x_centroids)
+    @test all(isfinite, dataset.theta_snapshots)
+    @test dataset.x_centroids[end] > dataset.x_centroids[1]
+end
+
+@testset "snapshot dataset timestep consistency" begin
+    output_coarse = tempname() * ".jld2"
+    output_fine = tempname() * ".jld2"
+    times = "0,0.25,0.5,0.75"
+    coarse = run_snapshot_dataset_script(output=output_coarse, dt=2.0^-9, Q=1e-4,
+        times=times, seed=7)
+    fine = run_snapshot_dataset_script(output=output_fine, dt=2.0^-10, Q=1e-4,
+        times=times, seed=7)
+
+    coarse_shift = coarse.x_centroids[end] - coarse.x_centroids[1]
+    fine_shift = fine.x_centroids[end] - fine.x_centroids[1]
+    @test coarse_shift > 0
+    @test fine_shift > 0
+    @test abs(coarse_shift - fine_shift) < 0.75
+end
+
 @testset "small smoke run" begin
     config = SimulationConfig(; L=8, Q=0.1, J=1.5, v=0.0, dt=0.001,
         burnin_steps=2, sample_stride=1, nsamples=2, ntrajectories=1, seed=11,
@@ -286,6 +324,29 @@ end
     @test size(result.C_minus_mean) == size(result.F_mean)
     @test size(result.C_plus_stderr) == size(result.F_mean)
     @test size(result.C_minus_stderr) == size(result.F_mean)
+end
+
+@testset "ordinary C correlator cluster script smoke" begin
+    output = tempname() * ".jld2"
+    script = joinpath(@__DIR__, "..", "scripts", "run_ordinary_c_correlator_cluster.jl")
+    project = joinpath(@__DIR__, "..")
+    dr = 0.5
+
+    run(`$(Base.julia_cmd()) --project=$project $script --L 6 --gamma 0.0 --J 1.0 --dt 0.001 --dr $dr --nangles 8 --burnin-time 0.0 --T-max 1 --ntimes 1 --nchunks 1 --array-count 1 --array-id 1 --burnin-log-time 1.0 --window-log-every 1 --output $output`)
+
+    loaded = JLD2.load(output)
+    @test haskey(loaded, "result")
+    result = loaded["result"]
+    @test result.passive.config.v == 0.0
+    @test result.active.config.v == 1.0
+    @test result.passive.config.dr == dr
+    @test length(result.passive.times_signed) == 3
+    @test first(result.passive.times_signed) ≈ -1.0
+    @test last(result.passive.times_signed) ≈ 1.0
+    @test size(result.passive.C_mean) == (length(result.passive.radii), 3)
+    @test size(result.active.C_mean) == size(result.passive.C_mean)
+    @test all(isapprox.(result.passive.C_mean, 1.0; atol=1e-12))
+    @test all(isapprox.(result.active.C_mean, 1.0; atol=1e-12))
 end
 
 @testset "spin-aligned correlator rejects invalid dr" begin

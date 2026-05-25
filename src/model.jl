@@ -42,6 +42,37 @@ function initial_angles(rng::AbstractRNG, L::Integer, initial_condition::Symbol)
     end
 end
 
+function seed_upward_bump!(theta::AbstractVector{Float64}, L::Integer;
+        center_x=L / 4, center_y=L / 2, radius=L / 10, transition_width=L / 40)
+    length(theta) == L * L || throw(DimensionMismatch("theta length must be L^2"))
+    twoπ = 2π
+    @inbounds for y in 1:L, x in 1:L
+        idx = site_index(x, y, L)
+        dx = x - center_x
+        dy = y - center_y
+        r = sqrt(dx^2 + dy^2)
+        weight = 0.5 * (1 - tanh((r - radius) / transition_width))
+        θbg = theta[idx]
+        c = (1 - weight) * cos(θbg) + weight * cos(pi / 2)
+        s = (1 - weight) * sin(θbg) + weight * sin(pi / 2)
+        theta[idx] = mod(atan(s, c), twoπ)
+    end
+    return theta
+end
+
+function positive_sin_marker_x(theta::AbstractVector{<:Real}, L::Integer)
+    length(theta) == L * L || throw(DimensionMismatch("theta length must be L^2"))
+    theta_grid = reshape(theta, L, L)
+    num = 0.0
+    den = 0.0
+    @inbounds for y in 1:L, x in 1:L
+        weight = max(sin(theta_grid[x, y]), 0.0)
+        num += x * weight
+        den += weight
+    end
+    return num / den
+end
+
 function compute_mu!(mu::AbstractVector{Float64}, theta::AbstractVector{<:Real}, params::ModelParams)
     L = params.L
     length(theta) == L * L || throw(DimensionMismatch("theta length must be L^2"))

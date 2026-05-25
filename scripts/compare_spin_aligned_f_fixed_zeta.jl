@@ -90,7 +90,7 @@ end
 function run_analysis(ensemble, args)
     radius_mask = ensemble.radii .<= args["radius-max"]
     any(radius_mask) || error("no radii satisfy r <= $(args["radius-max"])")
-    time_indices = findall(t -> t >= args["time-min"], ensemble.times)
+    time_indices = findall(t -> t > 0 && t >= args["time-min"], ensemble.times)
     isempty(time_indices) && error("no times satisfy t >= $(args["time-min"])")
 
     eta_values = collect(args["eta-min"]:args["eta-step"]:args["eta-max"])
@@ -140,6 +140,34 @@ function add_collapse_panel(fig, slot, collapse, feature, title)
     return ax
 end
 
+function add_collapse_panel_paper(fig, slot, collapse, feature, title)
+    ax = Axis(fig[slot...],
+        xlabel=L"r / t^{\zeta}",
+        ylabel=L"t^{\eta_F} F(r,t)",
+        title=title,
+        titlesize=9,
+        xlabelsize=9,
+        ylabelsize=9,
+        xticklabelsize=8,
+        yticklabelsize=8)
+    palette = Makie.wong_colors()
+    for (k, t) in enumerate(feature.times)
+        inds = findall(==(t), collapse.time)
+        local_order = sortperm(collapse.x[inds])
+        ordered_inds = inds[local_order]
+        band!(ax, collapse.x[ordered_inds],
+            collapse.y[ordered_inds] .- collapse.sigma[ordered_inds],
+            collapse.y[ordered_inds] .+ collapse.sigma[ordered_inds],
+            color=(palette[mod1(k, length(palette))], 0.22))
+        lines!(ax, collapse.x[ordered_inds], collapse.y[ordered_inds],
+            color=palette[mod1(k, length(palette))], linewidth=2.0,
+            label=L"t = %$(round(t; digits=3))")
+    end
+    vlines!(ax, [collapse.overlap_min, collapse.overlap_max], color=:gray55,
+        linestyle=:dash, linewidth=1.2)
+    return ax
+end
+
 function plot_comparison(path::String, analysis, label::AbstractString, fixed_zeta::Real)
     mkpath(dirname(path))
     fig = Figure(size=(1400, 650))
@@ -156,6 +184,29 @@ function plot_comparison(path::String, analysis, label::AbstractString, fixed_ze
     linkxaxes!(ax1, ax2)
     linkyaxes!(ax1, ax2)
     save(path, fig)
+end
+
+function plot_comparison_paper(path::String, analysis, fixed_zeta::Real)
+    mkpath(dirname(path))
+    with_theme(theme_latexfonts()) do
+        fig = Figure(size=(1150, 480), fontsize=9)
+
+        best_title = @sprintf("Free fit: η_F = %.3f, ζ = %.3f",
+            analysis.fine_best.eta, analysis.fine_best.zeta)
+        fixed_title = @sprintf("Fixed ζ = %.3f: η_F = %.3f",
+            fixed_zeta, analysis.fixed_best.eta)
+
+        ax1 = add_collapse_panel_paper(fig, (1, 1), analysis.fine_best,
+            analysis.feature, best_title)
+        ax2 = add_collapse_panel_paper(fig, (1, 2), analysis.fixed_best,
+            analysis.feature, fixed_title)
+        hidexdecorations!(ax1; grid=false, minorgrid=false)
+        linkxaxes!(ax1, ax2)
+        linkyaxes!(ax1, ax2)
+        axislegend(ax2, position=:rb, nbanks=2, framevisible=false, labelsize=8,
+            titlesize=8, patchsize=(14, 8))
+        save(path, fig)
+    end
 end
 
 function plot_fixed_eta_scan(path::String, analysis, fixed_zeta::Real, label::AbstractString)
@@ -207,10 +258,16 @@ function main()
 
     label = @sprintf("Late-time comparison (t >= %.1f)", args["time-min"])
     compare_plot = joinpath(args["figures-dir"], "spin_aligned_f_fixed_zeta_compare.png")
+    compare_plot_paper_png = joinpath(args["figures-dir"], "spin_aligned_f_fixed_zeta_compare_paper.png")
+    compare_plot_paper_pdf = joinpath(args["figures-dir"], "spin_aligned_f_fixed_zeta_compare_paper.pdf")
     eta_scan_plot = joinpath(args["figures-dir"], "spin_aligned_f_fixed_zeta_eta_scan.png")
     plot_comparison(compare_plot, analysis, label, args["fixed-zeta"])
+    plot_comparison_paper(compare_plot_paper_png, analysis, args["fixed-zeta"])
+    plot_comparison_paper(compare_plot_paper_pdf, analysis, args["fixed-zeta"])
     plot_fixed_eta_scan(eta_scan_plot, analysis, args["fixed-zeta"], label)
     println("saved comparison plot: ", compare_plot)
+    println("saved paper comparison: ", compare_plot_paper_png)
+    println("saved paper comparison: ", compare_plot_paper_pdf)
     println("saved fixed-eta scan: ", eta_scan_plot)
 
     summary_path = joinpath(args["results-dir"], "spin_aligned_f_fixed_zeta_compare_summary.md")

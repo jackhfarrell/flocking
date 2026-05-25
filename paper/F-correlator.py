@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import os
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.ticker import ScalarFormatter
 
 
@@ -89,25 +91,51 @@ def load_ensemble(data_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, n
     return radii, times, F_mean, F_stderr
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Render the paper-style spin-aligned F-correlator figure.",
+    )
+    parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    parser.add_argument("--output-stem", type=Path, default=Path(__file__).resolve().parent / OUTPUT_STEM)
+    parser.add_argument("--radius-max", type=float, default=30.0)
+    parser.add_argument("--eta", type=float, default=COLLAPSE_ETA)
+    parser.add_argument("--zeta", type=float, default=COLLAPSE_ZETA)
+    parser.add_argument(
+        "--show-markers",
+        action="store_true",
+        help="Draw point markers on the raw traces.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     here = Path(__file__).resolve().parent
     here.joinpath(".mplcache").mkdir(exist_ok=True)
-    radii, times, F_mean, F_stderr = load_ensemble(DATA_DIR)
-    radius_mask = radii <= 30.0
+    radii, times, F_mean, F_stderr = load_ensemble(args.data_dir)
+    radius_mask = radii <= args.radius_max
     time_mask = times > 0.0
 
     plot_radii = radii[radius_mask]
     plot_times = times[time_mask]
-    plot_mean = -F_mean[radius_mask][:, time_mask].T
+    plot_mean = F_mean[radius_mask][:, time_mask].T
     plot_stderr = F_stderr[radius_mask][:, time_mask].T
-    cmap = sns.color_palette("flare", as_cmap=True)
-    norm = mpl.colors.Normalize(vmin=plot_times.min(), vmax=plot_times.max())
+    colors = sns.color_palette("flare", n_colors=len(plot_times))
+    cmap = ListedColormap(colors)
+    if len(plot_times) > 1:
+        spacing = np.diff(plot_times)
+        lower_edge = plot_times[0] - 0.5 * spacing[0]
+        upper_edge = plot_times[-1] + 0.5 * spacing[-1]
+        inner_edges = 0.5 * (plot_times[:-1] + plot_times[1:])
+        boundaries = np.concatenate(([lower_edge], inner_edges, [upper_edge]))
+    else:
+        boundaries = np.array([plot_times[0] - 0.5, plot_times[0] + 0.5])
+    norm = BoundaryNorm(boundaries, cmap.N)
 
     fig = plt.figure(figsize=(COLUMN_WIDTH, FIGURE_HEIGHT), constrained_layout=False)
     ax = fig.add_axes([0.13, 0.17, 0.70, 0.765])
 
-    for time, trace, err in zip(plot_times, plot_mean, plot_stderr):
-        color = cmap(norm(time))
+    for color, time, trace, err in zip(colors, plot_times, plot_mean, plot_stderr):
         ax.fill_between(
             plot_radii,
             trace - err,
@@ -121,8 +149,8 @@ def main() -> None:
             trace,
             color=color,
             linewidth=1.2,
-            marker="o",
-            markersize=3.2,
+            marker="o" if args.show_markers else None,
+            markersize=3.2 if args.show_markers else 0.0,
             markeredgewidth=0.0,
         )
 
@@ -131,10 +159,9 @@ def main() -> None:
     collapse_xmax = -np.inf
     collapse_ymin = np.inf
     collapse_ymax = -np.inf
-    for time, trace in zip(plot_times, plot_mean):
-        x_scaled = plot_radii / (time ** COLLAPSE_ZETA)
-        y_scaled = trace * (time ** COLLAPSE_ETA)
-        color = cmap(norm(time))
+    for color, time, trace in zip(colors, plot_times, plot_mean):
+        x_scaled = plot_radii / (time ** args.zeta)
+        y_scaled = trace * (time ** args.eta)
         inset.plot(x_scaled, y_scaled, color=color, linewidth=1.2)
         collapse_xmin = min(collapse_xmin, np.min(x_scaled))
         collapse_xmax = max(collapse_xmax, np.max(x_scaled))
@@ -147,8 +174,8 @@ def main() -> None:
     inset.set_xticks([])
     inset.set_yticks([])
     inset.tick_params(length=0)
-    inset.set_xlabel(r"$r/t^{0.375}$", labelpad=1.5)
-    inset.set_ylabel(r"$t^{0.31} F$", labelpad=1.5)
+    inset.set_xlabel(rf"$r/t^{{{args.zeta:.3f}}}$", labelpad=1.5)
+    inset.set_ylabel(rf"$t^{{{args.eta:.3f}}} F$", labelpad=1.5)
     inset_formatter = ScalarFormatter(useMathText=True)
     inset_formatter.set_powerlimits((-3, -3))
     inset.yaxis.set_major_formatter(inset_formatter)
@@ -158,8 +185,8 @@ def main() -> None:
         ha="left", va="bottom", fontsize=FIGURE_TICK_SIZE)
 
     ax.axhline(0.0, color="0.75", linewidth=0.6, zorder=0)
-    ax.set_xlim(1, 30)
-    ax.set_xticks([5, 10, 15, 20, 25, 30])
+    ax.set_xlim(1, args.radius_max)
+    ax.set_xticks(np.arange(5, args.radius_max + 0.1, 5))
     ax.set_xlabel(r"$r$")
     ax.set_ylabel(r"$F(r,t)$")
     formatter = ScalarFormatter(useMathText=True)
@@ -173,14 +200,16 @@ def main() -> None:
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
     cax = fig.add_axes([0.85, 0.17, 0.024, 0.765])
-    cbar = fig.colorbar(sm, cax=cax)
+    cbar = fig.colorbar(sm, cax=cax, boundaries=boundaries, ticks=plot_times,
+        spacing="proportional")
     cbar.set_label(r"$t$", labelpad=5.0)
     cbar.ax.yaxis.set_label_position("right")
-    cbar.set_ticks(plot_times)
     cbar.ax.tick_params(labelsize=FIGURE_TICK_SIZE)
 
+    output_stem = args.output_stem
+    output_stem.parent.mkdir(parents=True, exist_ok=True)
     for suffix in ("pdf", "png"):
-        fig.savefig(here / f"{OUTPUT_STEM}.{suffix}")
+        fig.savefig(output_stem.with_suffix(f".{suffix}"))
 
 
 if __name__ == "__main__":
