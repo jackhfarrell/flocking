@@ -1,1 +1,11 @@
 *.jld2
+.DS_Store
+*.mp4
+__pycache__/
+*.py[cod]
+
+# Generated cache directories
+.cache/
+.mplcache/
+paper/.cache/
+paper/.mplcache/
