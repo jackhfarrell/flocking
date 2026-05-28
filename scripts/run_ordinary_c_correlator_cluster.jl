@@ -45,7 +45,7 @@ function parse_args()
             default = 16.0
         "--ntimes"
             arg_type = Int
-            default = 8
+            default = 32
         "--nchunks"
             arg_type = Int
             default = 10

@@ -36,5 +36,5 @@ sbatch \
     "--cpus-per-task=1" \
     "--mem-per-cpu=4G" \
     "--time=24:00:00" \
-    --export=ALL,L=200,GAMMA=1,J_VALUE=2,DT=0.001,DR=0.25,NANGLES=256,BURNIN_TIME=100,T_MAX=16,NTIMES=8,NCHUNKS=10,ARRAY_COUNT=500,BURNIN_LOG_TIME=1.0,WINDOW_LOG_EVERY=1,OUTPUT_DIR="${output_dir}" \
+    --export=ALL,L=200,GAMMA=1,J_VALUE=2,DT=0.001,DR=0.25,NANGLES=256,BURNIN_TIME=100,T_MAX=16,NTIMES=32,NCHUNKS=10,ARRAY_COUNT=500,BURNIN_LOG_TIME=1.0,WINDOW_LOG_EVERY=1,OUTPUT_DIR="${output_dir}" \
     scripts/submit_ordinary_c_correlator_point.sh

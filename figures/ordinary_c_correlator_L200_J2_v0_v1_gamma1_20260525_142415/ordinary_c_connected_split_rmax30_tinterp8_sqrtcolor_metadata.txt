@@ -1,0 +1,6 @@
+connected=true
+background_r_min=80.0
+time_upsampling=8
+color_scale=sqrt
+input_dir=/Users/jfarrell/Desktop/flocking/results/ordinary_c_correlator_L200_J2_v0_v1_gamma1_20260525_142415
+jobs=500
