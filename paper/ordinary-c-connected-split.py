@@ -18,10 +18,11 @@ from matplotlib.colors import LogNorm, Normalize, PowerNorm
 
 # Match paper/F-correlator.py.
 COLUMN_WIDTH = 3.375
-FIGURE_HEIGHT = 2.45
+FIGURE_HEIGHT = 2.30
 FIGURE_TEXT_SIZE = 9.0
 FIGURE_TICK_SIZE = 9.0
 OUTPUT_STEM = "ordinary-c-connected-split"
+SPLIT_COLOR = "#f6c19f"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_PREFIX = (
     REPO_ROOT
@@ -69,7 +70,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).resolve().parent / OUTPUT_STEM,
     )
-    parser.add_argument("--color-scale", choices=("linear", "mild", "sqrt", "quarter", "log"), default="mild")
+    parser.add_argument("--color-scale", choices=("linear", "mild", "sqrt", "quarter", "log"), default="linear")
     parser.add_argument("--cmap", default="mako")
     parser.add_argument("--r-max", type=float, default=20.0)
     parser.add_argument("--plot-transform", choices=("none", "log10"), default="none")
@@ -134,7 +135,7 @@ def main() -> None:
     cmap = sns.color_palette(args.cmap, as_cmap=True)
 
     fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, FIGURE_HEIGHT), constrained_layout=False)
-    fig.subplots_adjust(left=0.18, bottom=0.22, right=0.90, top=0.96)
+    fig.subplots_adjust(left=0.16, bottom=0.20, right=0.93, top=0.98)
 
     mesh = ax.pcolormesh(
         x,
@@ -158,7 +159,7 @@ def main() -> None:
             linewidths=0.35,
             alpha=0.36,
         )
-    ax.axvline(0.0, color="white", linewidth=0.65)
+    ax.axvline(0.0, color=SPLIT_COLOR, linewidth=1.15)
 
     xmax = float(np.max(np.abs(x)))
     ax.set_xlim(-xmax, xmax)
@@ -175,21 +176,21 @@ def main() -> None:
     ax.text(
         -0.50 * xmax,
         0.965,
-        r"$v=0$",
+        r"$v_0=0$",
         transform=ax.get_xaxis_transform(),
         ha="center",
         va="top",
-        color="white",
+        color=SPLIT_COLOR,
         fontsize=FIGURE_TEXT_SIZE,
     )
     ax.text(
         0.50 * xmax,
         0.965,
-        r"$v=1$",
+        r"$v_0=1$",
         transform=ax.get_xaxis_transform(),
         ha="center",
         va="top",
-        color="white",
+        color=SPLIT_COLOR,
         fontsize=FIGURE_TEXT_SIZE,
     )
 
@@ -197,7 +198,7 @@ def main() -> None:
     cbar_label = (
         r"$\log_{10} C(r,t)$"
         if args.plot_transform == "log10"
-        else r"$C(r,t)\equiv\langle\theta(r,t)\theta(0,0)\rangle_c$"
+        else r"$C(r,t)\equiv\langle\hat{\mathbf n}(r,t)\!\cdot\!\hat{\mathbf n}(0,0)\rangle_c$"
     )
     cbar.set_label(cbar_label, labelpad=3.0, fontsize=FIGURE_TEXT_SIZE)
     cbar.ax.yaxis.set_label_position("right")

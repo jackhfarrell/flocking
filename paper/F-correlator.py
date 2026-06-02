@@ -23,11 +23,11 @@ COLUMN_WIDTH = 3.375
 FIGURE_HEIGHT = 2.45
 OUTPUT_STEM = "F-correlator"
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = REPO_ROOT / "results" / "spin_aligned_f_correlator_L200_J2_v1_gamma1"
+DATA_DIR = REPO_ROOT / "results" / "spin_aligned_f_correlator_L200_J2_v1_gamma1_20260520_153353"
 FIGURE_TEXT_SIZE = 10.0
 FIGURE_TICK_SIZE = 9.0
-COLLAPSE_ETA = 0.31
-COLLAPSE_ZETA = 0.375
+COLLAPSE_ETA = 0.3100
+COLLAPSE_ZETA = 0.3900
 
 
 mpl.rcParams.update(
