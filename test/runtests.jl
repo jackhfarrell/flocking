@@ -122,6 +122,35 @@ end
     @test all(stderr2 .>= 0)
 end
 
+@testset "lag step schedule" begin
+    ntimes = 8
+    lag_steps = 2000
+
+    uniform = lag_step_schedule(ntimes, lag_steps; spacing=:uniform)
+    @test uniform.cum_steps == collect(0:ntimes) .* lag_steps
+    @test all(==(lag_steps), uniform.advance_gaps)
+    @test length(uniform.advance_gaps) == 2ntimes
+
+    geom = lag_step_schedule(ntimes, lag_steps; spacing=:geometric)
+    @test length(geom.cum_steps) == ntimes + 1
+    @test geom.cum_steps[1] == 0
+    @test geom.cum_steps[2] == lag_steps
+    @test geom.cum_steps[end] == ntimes * lag_steps
+    @test issorted(geom.cum_steps)
+    @test all(>(0), geom.gaps)
+    # genuinely non-uniform geometric spacing
+    @test !all(==(geom.gaps[1]), geom.gaps)
+    # advance gaps are symmetric about the window midpoint
+    @test geom.advance_gaps == [reverse(geom.gaps); geom.gaps]
+    @test geom.advance_gaps[1:ntimes] == reverse(geom.advance_gaps[(ntimes + 1):end])
+
+    # ntimes == 1 degenerates to the uniform single-lag schedule
+    @test lag_step_schedule(1, lag_steps; spacing=:geometric).cum_steps == [0, lag_steps]
+
+    @test_throws ArgumentError lag_step_schedule(0, lag_steps)
+    @test_throws ArgumentError lag_step_schedule(ntimes, lag_steps; spacing=:linear)
+end
+
 @testset "eta equilibrium predicate" begin
     @test observable_window_range([0.3, 0.2, 0.25], 3) ≈ 0.1
     @test eta_window_range([0.3, 0.2], 3) == Inf
@@ -347,6 +376,175 @@ end
     @test size(result.active.C_mean) == size(result.passive.C_mean)
     @test all(isapprox.(result.passive.C_mean, 1.0; atol=1e-12))
     @test all(isapprox.(result.active.C_mean, 1.0; atol=1e-12))
+end
+
+@testset "stage-1 ladder script library and resume" begin
+    library = joinpath(tempname(), "ladder")
+    script = joinpath(@__DIR__, "..", "scripts", "run_stage1_ladder_cluster.jl")
+    project = joinpath(@__DIR__, "..")
+    ladder_args = String[
+        "--L", "6", "--gamma", "0.0", "--J", "1.0", "--dt", "0.001",
+        "--vmin", "0.5", "--vmax", "2.0", "--nv", "3",
+        "--directions", "up,down", "--ntrajectories", "2", "--base-seed", "5",
+        "--init", "ordered",
+        "--equil-block-steps", "1", "--equil-max-blocks", "3", "--equil-window", "1",
+        "--equil-window-time", "0", "--equil-energy-threshold", "1e9",
+        "--equil-magnetization-threshold", "1e9", "--equil-log-every", "1",
+        "--library-dir", library,
+    ]
+    run(`$(Base.julia_cmd()) --project=$project $script $(ladder_args)`)
+
+    # v-keyed library: one directory per grid point, each holding both directions
+    # for every trajectory.
+    vkeys = filter(d -> startswith(d, "v_"), readdir(library))
+    @test length(vkeys) == 3
+    for vkey in vkeys, direction in ("up", "down"), traj in 1:2
+        path = joinpath(library, vkey, "$(direction)_traj_$(lpad(traj, 3, '0')).jld2")
+        @test isfile(path)
+        result = JLD2.load(path, "result")
+        @test length(result.theta) == 36
+        @test result.config.direction == direction
+        @test result.config.traj == traj
+        @test result.config.reached
+    end
+
+    # Kill-and-resume: drop the last baked rung, keep an earlier one's state, rerun.
+    last_rung = joinpath(library, "v_01_0.500000", "down_traj_002.jld2")
+    early_rung = joinpath(library, "v_03_2.000000", "up_traj_001.jld2")
+    dropped_theta = JLD2.load(last_rung, "result").theta
+    early_theta = JLD2.load(early_rung, "result").theta
+    early_mtime = mtime(early_rung)
+    rm(last_rung)
+
+    run(`$(Base.julia_cmd()) --project=$project $script $(ladder_args)`)
+
+    # The deleted rung is regenerated bit-for-bit (deterministic per-rung seed)...
+    @test JLD2.load(last_rung, "result").theta == dropped_theta
+    # ...while completed rungs are not recomputed (file untouched).
+    @test mtime(early_rung) == early_mtime
+    @test JLD2.load(early_rung, "result").theta == early_theta
+end
+
+@testset "stage-2 measurement reads per-v library and chi2 budget" begin
+    library = joinpath(tempname(), "ladder")
+    output_dir = joinpath(tempname(), "stage2")
+    ladder = joinpath(@__DIR__, "..", "scripts", "run_stage1_ladder_cluster.jl")
+    stage2 = joinpath(@__DIR__, "..", "scripts", "run_stage2_measurement_cluster.jl")
+    project = joinpath(@__DIR__, "..")
+
+    run(`$(Base.julia_cmd()) --project=$project $ladder
+        --L 6 --gamma 0.0 --J 1.0 --dt 0.001 --vmin 0.5 --vmax 2.0 --nv 3
+        --directions up --ntrajectories 1 --base-seed 5 --init ordered
+        --equil-block-steps 1 --equil-max-blocks 3 --equil-window 1
+        --equil-window-time 0 --equil-energy-threshold 1e9
+        --equil-magnetization-threshold 1e9 --equil-log-every 1
+        --library-dir $library`)
+
+    # Budget 4,2,1 is chi-squared-shaped (heavier at low v). With chunks-per-job 2 the
+    # low-v rung spills into two single-core array tasks; both target v = 0.5.
+    stage2_args = String[
+        "--library-dir", library, "--direction", "up", "--traj", "1",
+        "--L", "6", "--gamma", "0.0", "--J", "1.0",
+        "--vmin", "0.5", "--vmax", "2.0", "--nv", "3",
+        "--window-budget", "4,2,1", "--chunks-per-job", "2",
+        "--dt", "0.001", "--dr", "0.5", "--r-max", "3.0", "--solver", "SRA1",
+        "--T-max", "1", "--ntimes", "1", "--output-dir", output_dir,
+    ]
+    for array_id in (1, 2)
+        run(`$(Base.julia_cmd()) --project=$project $stage2 $(stage2_args) --array-id $array_id`)
+    end
+
+    # Both tasks land in the v = 0.5 subdirectory as collapse-ready sample files.
+    vdir = joinpath(output_dir, "v_01_0.500000")
+    files = sort(filter(f -> startswith(f, "sample_"), readdir(vdir)))
+    @test files == ["sample_0001.jld2", "sample_0002.jld2"]
+
+    result = JLD2.load(joinpath(vdir, files[1]), "result")
+    @test result.v_values == [0.5]
+    @test length(result.radii) == 6
+    @test result.times == [0.0, 1.0]
+    @test size(result.F) == (1, length(result.radii), 2)
+    @test size(result.C_plus) == size(result.F)
+    @test size(result.C_minus) == size(result.F)
+    @test all(isfinite, result.F)
+    # Baked state read straight from the per-v library, no burn-in.
+    @test result.config.v == 0.5
+    @test result.config.direction == "up"
+    @test result.config.budget_v == 4
+    @test result.config.chunks == 2
+    @test !hasproperty(result.config, :burnin_steps)
+    @test result.config.equilibrium ==
+        joinpath(library, "v_01_0.500000", "up_traj_001.jld2")
+
+    # An array id past the budget's task table is rejected.
+    bad = Cmd(`$(Base.julia_cmd()) --project=$project $stage2 $(stage2_args) --array-id 99`;
+        ignorestatus=true)
+    @test !success(bad)
+end
+
+@testset "L=200 timing benchmark writes a budget table" begin
+    output = tempname() * ".jld2"
+    csv = tempname() * ".csv"
+    script = joinpath(@__DIR__, "..", "scripts", "run_l200_timing_benchmark_cluster.jl")
+    project = joinpath(@__DIR__, "..")
+
+    run(`$(Base.julia_cmd()) --project=$project $script
+        --L 6 --gamma 0.0 --J 1.0 --velocities 0.5,1.0 --solvers SRA1,SRA2
+        --dts 0.001 --dr 0.5 --r-max 3.0 --T-max 1 --ntimes 1 --reps 1
+        --output $output --csv $csv`)
+
+    result = JLD2.load(output, "result")
+    # One row per (velocity, solver, dt) combo: 2 velocities x 2 solvers x 1 dt.
+    @test length(result.rows) == 4
+    @test result.config.ntimes == 1
+    @test length(result.radii) == 6
+    for row in result.rows
+        @test row.window_steps == 2000  # 2*ntimes advances of lag_steps = T_max/ntimes/dt
+        @test row.t_window >= 0
+        @test isapprox(row.t_window, row.t_integrate + row.t_correlator)
+        @test row.integrate_us_per_step >= 0
+    end
+    @test Set(getproperty.(result.rows, :solver)) == Set(["SRA1", "SRA2"])
+
+    lines = readlines(csv)
+    @test lines[1] ==
+        "v,solver,dt,window_steps,t_integrate_s,t_correlator_s,t_window_s,integrate_us_per_step"
+    @test length(lines) == 5  # header + one line per combo
+end
+
+@testset "CRN dt-coupling reproduces the coarse path" begin
+    L = 8
+    params = ModelParams(; L, Q=1.0, J=2.0, v=1.0)
+    work = LatticeFlockingSDE.DriftWorkspace(params)
+    rng = Random.MersenneTwister(3)
+    theta0 = initial_angles(rng, L, :ordered)
+    solver = SRA1()
+    dt = 0.01
+    prob = SDEProblem(LatticeFlockingSDE.drift!, LatticeFlockingSDE.noise!,
+        theta0, (0.0, 0.5), work)
+    fine = solve(prob, solver; dt=dt / 2, adaptive=false, save_everystep=false,
+        save_start=false, save_noise=true, seed=7)
+
+    # Re-driving the same Wiener path at dt/2 reproduces the trajectory exactly.
+    same = solve(remake(prob; noise=NoiseWrapper(fine.W)), solver; dt=dt / 2,
+        adaptive=false, save_everystep=false, save_start=false)
+    @test maximum(abs.(fine.u[end] .- same.u[end])) < 1e-12
+
+    # Coarsening that same path to dt gives a small, controlled (nonzero) difference.
+    coarse = solve(remake(prob; noise=NoiseWrapper(fine.W)), solver; dt=dt,
+        adaptive=false, save_everystep=false, save_start=false)
+    gap = maximum(abs.(fine.u[end] .- coarse.u[end]))
+    @test 0 < gap < 1.0
+end
+
+@testset "dt-convergence CRN harness smoke" begin
+    script = joinpath(@__DIR__, "..", "scripts", "dt_convergence_crn.jl")
+    project = joinpath(@__DIR__, "..")
+    output = read(`$(Base.julia_cmd()) --project=$project $script --L 16 --nchunks 1
+        --ntimes 3 --burnin-time 1.0 --T-max 3.0 --dr 1.0 --r-max 7.0
+        --velocities 1.0 --base-seed 4`, String)
+    @test occursin("zeta(dt/2)", output)
+    @test occursin("max |dzeta|", output)
 end
 
 @testset "spin-aligned correlator rejects invalid dr" begin
