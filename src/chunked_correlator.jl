@@ -22,6 +22,25 @@ function radial_displacement_shells(L::Integer; oriented::Bool=false)
     return (; radii, shells)
 end
 
+function lag_step_schedule(ntimes::Integer, lag_steps::Integer; spacing::Symbol=:geometric)
+    ntimes >= 1 || throw(ArgumentError("ntimes must be positive"))
+    lag_steps >= 1 || throw(ArgumentError("lag_steps must be positive"))
+    if spacing == :uniform || ntimes == 1
+        cum_steps = collect(0:ntimes) .* lag_steps
+    elseif spacing == :geometric
+        ratio = float(ntimes)
+        cum_steps = [0; [round(Int, lag_steps * ratio^((k - 1) / (ntimes - 1)))
+                         for k in 1:ntimes]]
+    else
+        throw(ArgumentError("spacing must be :uniform or :geometric"))
+    end
+    gaps = diff(cum_steps)
+    all(>(0), gaps) ||
+        throw(ArgumentError("lag schedule is not strictly increasing; raise T-max/dt or lower ntimes"))
+    advance_gaps = [reverse(gaps); gaps]
+    return (; cum_steps, gaps, advance_gaps)
+end
+
 function chunk_correlator(window::AbstractVector, params::ModelParams, shell_data)
     L = params.L
     nsites = L * L
