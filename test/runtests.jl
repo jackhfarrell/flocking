@@ -7,6 +7,8 @@ using JLD2
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
 
+include(joinpath(@__DIR__, "..", "scripts", "calibration_schedule.jl"))
+
 const DEFAULT_ACTIVE_SNAPSHOT_DT = 2.0^-9
 
 function build_snapshot_theta0(L::Integer; center_x=L / 4, center_y=L / 2,
@@ -545,6 +547,74 @@ end
         --velocities 1.0 --base-seed 4`, String)
     @test occursin("zeta(dt/2)", output)
     @test occursin("max |dzeta|", output)
+end
+
+@testset "v10 equilibration driver records plateau timing" begin
+    output = tempname() * ".jld2"
+    script = joinpath(@__DIR__, "..", "scripts", "run_v10_equilibration_cluster.jl")
+    project = joinpath(@__DIR__, "..")
+
+    # Loose thresholds on a tiny lattice so the block loop plateaus quickly.
+    run(`$(Base.julia_cmd()) --project=$project $script
+        --L 10 --gamma 1.0 --J 2.0 --v 10.0 --dt 0.01 --solver SRIW1 --init ordered
+        --equil-block-steps 20 --equil-max-blocks 40 --equil-window 3
+        --equil-window-time 0.0 --equil-energy-threshold 5.0
+        --equil-magnetization-threshold 5.0 --base-seed 3 --output $output`)
+
+    config = JLD2.load(output, "result").config
+    @test config.v == 10.0
+    @test config.reached           # loose thresholds guarantee the plateau predicate trips
+    @test config.blocks >= 1
+    @test config.steps == config.blocks * 20
+    @test config.equil_time == config.steps * 0.01
+    @test config.wall_s >= 0
+    theta = JLD2.load(output, "result").theta
+    @test length(theta) == 100     # L^2 equilibrated field is saved
+end
+
+@testset "calibration campaign selects dt(v) from anchor convergence" begin
+    # v=10: dt=0.001 converges (Δζ<tol), dt=0.002 does not -> pick coarsest converged dt.
+    # v=1: both converge -> pick the coarser (0.002). v=0.1: neither -> finest dt, flagged.
+    rows = [
+        (; v=10.0, dt=0.002, dzeta=0.010),
+        (; v=10.0, dt=0.001, dzeta=0.003),
+        (; v=1.0, dt=0.002, dzeta=0.002),
+        (; v=1.0, dt=0.001, dzeta=0.001),
+        (; v=0.1, dt=0.002, dzeta=0.020),
+        (; v=0.1, dt=0.001, dzeta=0.008),
+    ]
+    schedule = select_production_dt(rows; tol=0.005)
+    @test [s.v for s in schedule] == [0.1, 1.0, 10.0]  # sorted ascending in v
+    byv = Dict(s.v => s for s in schedule)
+    @test byv[10.0].dt == 0.001 && byv[10.0].converged
+    @test byv[1.0].dt == 0.002 && byv[1.0].converged  # coarsest among converged
+    @test byv[0.1].dt == 0.001 && !byv[0.1].converged  # fall back to finest, flagged
+end
+
+@testset "calibration campaign selects a stable T_max window" begin
+    # zeta plateaus at 0.38 for window_end >= 5 while the objective keeps improving;
+    # the early short windows are noisy. Expect the best-objective stable window (7).
+    candidates = [
+        (; window_end=3, zeta=0.30, objective=2.0),
+        (; window_end=4, zeta=0.34, objective=1.5),
+        (; window_end=5, zeta=0.381, objective=1.1),
+        (; window_end=6, zeta=0.379, objective=0.9),
+        (; window_end=7, zeta=0.380, objective=0.7),
+        (; window_end=8, zeta=0.377, objective=0.8),
+    ]
+    result = select_stable_window(candidates; zeta_tol=0.005)
+    @test result.selected.window_end == 7
+    @test result.stable
+
+    # No window is stable (zeta never settles): fall back to the global best objective.
+    jumpy = [
+        (; window_end=3, zeta=0.20, objective=1.0),
+        (; window_end=4, zeta=0.40, objective=0.5),
+        (; window_end=5, zeta=0.25, objective=0.8),
+    ]
+    fallback = select_stable_window(jumpy; zeta_tol=0.005)
+    @test fallback.selected.window_end == 4
+    @test !fallback.stable
 end
 
 @testset "spin-aligned correlator rejects invalid dr" begin
