@@ -17,10 +17,19 @@ using JLD2
 using Printf
 using Random
 using StochasticDiffEq
-using Statistics
 
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
+
+# Reuses the production least-squares data-collapse fit (scan_grid/evaluate_collapse) as
+# the zeta estimator. A simple trough-position fit was tried first and dropped: it isn't
+# robust (see issue 01, fit-window-robustness), and at v=10 in particular it locks onto
+# whatever bin is the argmin even when that's a boundary/noise artifact rather than the
+# real scaling front. The collapse objective's reduced_chi2 gives an honest goodness-of-fit
+# instead of silently trusting a single trough per lag.
+include(joinpath(@__DIR__, "spin_aligned_f_analysis.jl"))
+
+const POLY_ORDER = 3
 
 function loginfo(message::String, fields::Pair...)
     pieces = ["$(first(field))=$(repr(last(field)))" for field in fields]
@@ -165,28 +174,45 @@ function spin_aligned_f_correlator(window::AbstractVector, params::ModelParams,
     return F
 end
 
-# Collapse exponent ζ from the trough-position power law r_trough(t) ∝ t^ζ.
-# The trough radius is refined to sub-bin precision with a parabolic fit through the
-# minimum and its neighbours, so ζ varies continuously instead of jumping by whole bins.
-function trough_zeta(F::AbstractMatrix, radii::AbstractVector, times::AbstractVector)
-    ntimes = length(times) - 1
-    dr = radii[2] - radii[1]
-    log_t = Float64[]
-    log_r = Float64[]
-    for tidx in 2:(ntimes + 1)
-        trace = @view F[:, tidx]
-        i = argmin(trace)
-        r = radii[i]
-        if 1 < i < length(radii)
-            denom = trace[i - 1] - 2 * trace[i] + trace[i + 1]
-            denom != 0 && (r += 0.5 * (trace[i - 1] - trace[i + 1]) / denom * dr)
-        end
-        push!(log_t, log(times[tidx]))
-        push!(log_r, log(r))
-    end
-    xbar = mean(log_t)
-    ybar = mean(log_r)
-    return sum((log_t .- xbar) .* (log_r .- ybar)) / sum((log_t .- xbar).^2)
+# Mean and standard error across chunks, the same sum/sumsq -> stderr construction
+# check_v1_speedup.jl's load_streaming_stats uses across independent sample files.
+function chunk_mean_stderr(chunks::AbstractVector{<:AbstractMatrix})
+    n = length(chunks)
+    sum_F = sum(chunks)
+    sumsq_F = sum(F .^ 2 for F in chunks)
+    mean_F = sum_F ./ n
+    variance_F = max.((sumsq_F .- n .* mean_F .^ 2) ./ (n - 1), 0.0)
+    return mean_F, sqrt.(variance_F ./ n)
+end
+
+# Raw trough radius at each lag, with no power-law fit through it — purely a boundary-
+# contamination check, so it must survive exactly the noisy/near-zero traces that make a
+# trough-amplitude fit (spin_aligned_f_analysis.jl's feature_estimate) throw on log of a
+# slightly-negative amplitude.
+function max_trough_radius(F_mean::AbstractMatrix, radii::AbstractVector,
+        time_indices::AbstractVector{Int})
+    return maximum(radii[argmin(@view F_mean[:, tidx])] for tidx in time_indices)
+end
+
+# Fit zeta by the production least-squares data-collapse (scan_grid/evaluate_collapse),
+# coarse-then-fine as in check_v1_speedup.jl, rather than a trough-position power law: the
+# latter isn't robust (issue 01) and at v=10 can lock onto a boundary/noise artifact instead
+# of the real scaling front. Returns zeta, its reduced_chi2, and the trough radius at the
+# largest lag (a boundary-contamination check: if it sits near r_max, the front ran out of
+# room and even the collapse fit is being asked to fit a finite-size artifact).
+function collapse_zeta(radii::AbstractVector, times::AbstractVector, F_mean, F_stderr,
+        eta_values::AbstractVector, zeta_values::AbstractVector, nbins::Integer)
+    radius_mask = trues(length(radii))
+    time_indices = findall(>(0), times)
+    _, coarse_best = scan_grid(radii, times, F_mean, F_stderr, radius_mask, time_indices,
+        eta_values, zeta_values, POLY_ORDER, nbins)
+    eta_step = eta_values[2] - eta_values[1]
+    zeta_step = zeta_values[2] - zeta_values[1]
+    fine_eta = collect((coarse_best.eta - 3eta_step):(eta_step / 4):(coarse_best.eta + 3eta_step))
+    fine_zeta = collect((coarse_best.zeta - 3zeta_step):(zeta_step / 4):(coarse_best.zeta + 3zeta_step))
+    _, fine_best = scan_grid(radii, times, F_mean, F_stderr, radius_mask, time_indices,
+        fine_eta, fine_zeta, POLY_ORDER, nbins)
+    return fine_best.zeta, fine_best.reduced_chi2, max_trough_radius(F_mean, radii, time_indices)
 end
 
 function main()
@@ -197,6 +223,7 @@ function main()
     dr = args["dr"]
     ntimes = args["ntimes"]
     nchunks = args["nchunks"]
+    nchunks >= 2 || throw(ArgumentError("--nchunks must be at least 2 (chunks supply the collapse fit's per-point stderr)"))
     tol = args["tol"]
     solver = select_solver(args["solver"])
     velocities = parse.(Float64, split(args["velocities"], ","))
@@ -207,6 +234,9 @@ function main()
     sample_times = [0; cumsum(schedule.advance_gaps)] .* dt
     radii = collect(dr:dr:min(args["r-max"], L / 2))
     times = schedule.cum_steps .* dt
+    nbins = clamp(length(radii) ÷ 3, 5, 60)
+    coarse_eta = collect(-0.2:0.02:1.6)
+    coarse_zeta = collect(-0.2:0.02:1.2)
 
     @printf("# CRN dt-convergence harness  L=%d  J=%.3g  gamma=%.3g  solver=%s\n",
         L, args["J"], args["gamma"], args["solver"])
@@ -218,8 +248,9 @@ function main()
         :gamma => args["gamma"], :solver => args["solver"], :dt => dt, :dt_fine => dt_fine,
         :velocities => Tuple(velocities), :ntimes => ntimes, :nchunks => nchunks, :tol => tol)
 
-    rows = NamedTuple{(:v, :dt, :dt_fine, :zeta_coarse, :zeta_fine, :dzeta, :converged),
-        Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Bool}}[]
+    rows = NamedTuple{(:v, :dt, :dt_fine, :zeta_coarse, :zeta_fine, :dzeta, :converged,
+        :chi2_coarse, :chi2_fine),
+        Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Bool,Float64,Float64}}[]
     max_gap = 0.0
     for (vi, v) in enumerate(velocities)
         params = ModelParams(; L, Q=args["gamma"], J=args["J"], v)
@@ -233,8 +264,8 @@ function main()
         theta = wrap_angles!(collect(solve(burn_prob, solver; dt=dt_fine, adaptive=false,
             save_everystep=false, save_start=false, rng).u[end]))
 
-        F_fine = zeros(Float64, length(radii), ntimes + 1)
-        F_coarse = zeros(Float64, length(radii), ntimes + 1)
+        chunks_fine = Matrix{Float64}[]
+        chunks_coarse = Matrix{Float64}[]
         for chunk in 1:nchunks
             seed = args["base-seed"] + 1000 * (vi - 1) + chunk
             prob = SDEProblem(LatticeFlockingSDE.drift!, LatticeFlockingSDE.noise!,
@@ -247,8 +278,8 @@ function main()
 
             window_fine = [wrap_angles!(collect(u)) for u in sol_fine.u]
             window_coarse = [wrap_angles!(collect(u)) for u in sol_coarse.u]
-            F_fine .+= spin_aligned_f_correlator(window_fine, params, radii)
-            F_coarse .+= spin_aligned_f_correlator(window_coarse, params, radii)
+            push!(chunks_fine, spin_aligned_f_correlator(window_fine, params, radii))
+            push!(chunks_coarse, spin_aligned_f_correlator(window_coarse, params, radii))
             theta = window_fine[end]
 
             # sol_fine.W holds the full per-step Wiener path (save_noise=true); at L=200,
@@ -258,19 +289,31 @@ function main()
             sol_coarse = nothing
             GC.gc()
         end
-        F_fine ./= nchunks
-        F_coarse ./= nchunks
 
-        zeta_fine = trough_zeta(F_fine, radii, times)
-        zeta_coarse = trough_zeta(F_coarse, radii, times)
+        F_mean_fine, F_stderr_fine = chunk_mean_stderr(chunks_fine)
+        F_mean_coarse, F_stderr_coarse = chunk_mean_stderr(chunks_coarse)
+        zeta_fine, chi2_fine, r_last_fine = collapse_zeta(radii, times, F_mean_fine,
+            F_stderr_fine, coarse_eta, coarse_zeta, nbins)
+        zeta_coarse, chi2_coarse, r_last_coarse = collapse_zeta(radii, times, F_mean_coarse,
+            F_stderr_coarse, coarse_eta, coarse_zeta, nbins)
         gap = abs(zeta_coarse - zeta_fine)
         max_gap = max(max_gap, gap)
         converged = gap < tol
-        push!(rows, (; v, dt, dt_fine, zeta_coarse, zeta_fine, dzeta=gap, converged))
+        push!(rows, (; v, dt, dt_fine, zeta_coarse, zeta_fine, dzeta=gap, converged,
+            chi2_coarse, chi2_fine))
         @printf("  %-8.3g  %-10.4f  %-10.4f  %-10.4f  %s\n",
             v, zeta_coarse, zeta_fine, gap, converged ? "converged" : "REFINE")
         loginfo("dt-convergence anchor", :v => v, :dt => dt, :zeta_coarse => zeta_coarse,
-            :zeta_fine => zeta_fine, :dzeta => gap, :converged => converged)
+            :zeta_fine => zeta_fine, :dzeta => gap, :converged => converged,
+            :chi2_coarse => chi2_coarse, :chi2_fine => chi2_fine)
+        # Boundary-contamination check: if the trough at the largest lag sits near the
+        # capped radius, the front ran out of room and the collapse fit is chasing a
+        # finite-size artifact rather than the real scaling front.
+        r_cap = radii[end]
+        near_boundary = max(r_last_fine, r_last_coarse) > 0.8 * r_cap
+        loginfo("trough boundary check", :v => v, :r_last_fine => r_last_fine,
+            :r_last_coarse => r_last_coarse, :r_cap => r_cap, :L_half => L / 2,
+            :near_boundary => near_boundary)
     end
 
     converged = max_gap < tol
@@ -283,13 +326,14 @@ function main()
     if !isempty(args["csv"])
         mkpath(dirname(abspath(args["csv"])))
         open(args["csv"], "w") do io
-            println(io, "v,dt,dt_fine,zeta_coarse,zeta_fine,dzeta,converged")
+            println(io, "v,dt,dt_fine,zeta_coarse,zeta_fine,dzeta,converged,chi2_coarse,chi2_fine")
             for row in rows
                 println(io, join((
                     @sprintf("%.12g", row.v), @sprintf("%.12g", row.dt),
                     @sprintf("%.12g", row.dt_fine), @sprintf("%.8f", row.zeta_coarse),
                     @sprintf("%.8f", row.zeta_fine), @sprintf("%.8f", row.dzeta),
-                    row.converged ? 1 : 0), ","))
+                    row.converged ? 1 : 0, @sprintf("%.6g", row.chi2_coarse),
+                    @sprintf("%.6g", row.chi2_fine)), ","))
             end
         end
     end

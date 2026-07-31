@@ -542,7 +542,7 @@ end
 @testset "dt-convergence CRN harness smoke" begin
     script = joinpath(@__DIR__, "..", "scripts", "dt_convergence_crn.jl")
     project = joinpath(@__DIR__, "..")
-    output = read(`$(Base.julia_cmd()) --project=$project $script --L 16 --nchunks 1
+    output = read(`$(Base.julia_cmd()) --project=$project $script --L 16 --nchunks 2
         --ntimes 3 --burnin-time 1.0 --T-max 3.0 --dr 1.0 --r-max 7.0
         --velocities 1.0 --base-seed 4`, String)
     @test occursin("zeta(dt/2)", output)
