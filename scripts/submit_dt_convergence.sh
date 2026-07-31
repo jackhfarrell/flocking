@@ -9,20 +9,20 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=64G
+#SBATCH --mem=8G
 #SBATCH --time=24:00:00
 
-# Memory note: the CRN fine solve runs with save_noise=true, storing the full Wiener path
-# (an L^2-vector per internal step) so the coarse solve can replay it. At L=200 with the
-# dt=0.001 candidate that path is ~10 GB, and SRA1's RSWM keeps two noise arrays, so peak
-# RSS lands in the low tens of GB. 4G/core OOM-killed it, then 32G OOM-killed it too because
-# nchunks=4 chunks' worth of noise arrays weren't collected before the next chunk allocated
-# (see the explicit GC.gc() per chunk in dt_convergence_crn.jl). 64G gives headroom on the
-# worst (finest-dt, v=10) task even with prompt collection. Pass `sbatch --mem=... ` to
-# override further if a candidate dt goes finer.
+# The PRD (dt-convergence is a local/intensive accuracy question) calibrates dt on small L,
+# not the L=200 production lattice, and dt is assumed to transfer. Running this at L=200 was
+# the actual bug behind the earlier OOMs: the CRN fine solve runs with save_noise=true, storing
+# the full Wiener path (an L^2-vector per internal step), and at L=200/dt=0.001 that path alone
+# is ~10 GB before accounting for SRA1's RSWM overhead or nchunks. No amount of --mem or
+# per-chunk GC.gc() fixes that; it was solving the wrong problem. At the default L=40 the same
+# path is L=200's ~1/25th the size, so 8G is generous headroom. Pass `sbatch --mem=...` to
+# override if L or a candidate dt is pushed up.
 
 # One array task per candidate dt: each runs the CRN dt-convergence bake-off across the
-# anchor velocities (worst case v=10, then 1 and 0.1) at L=200, coupling dt and dt/2 on a
+# anchor velocities (worst case v=10, then 1 and 0.1) at small L, coupling dt and dt/2 on a
 # shared Wiener path and reporting |zeta(dt) - zeta(dt/2)|. Each task writes its own CSV;
 # the operator assembles dt(v) by taking the coarsest dt whose gap is within tol per anchor
 # (scripts/calibration_schedule.jl:select_production_dt). Two candidates keep this trivially
@@ -45,7 +45,7 @@ command -v julia >/dev/null 2>&1 || {
     exit 1
 }
 
-L="${L:-200}"
+L="${L:-40}"
 GAMMA="${GAMMA:-1}"
 J_VALUE="${J_VALUE:-2}"
 VELOCITIES="${VELOCITIES:-10.0,1.0,0.1}"
