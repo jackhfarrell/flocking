@@ -250,6 +250,13 @@ function main()
             F_fine .+= spin_aligned_f_correlator(window_fine, params, radii)
             F_coarse .+= spin_aligned_f_correlator(window_coarse, params, radii)
             theta = window_fine[end]
+
+            # sol_fine.W holds the full per-step Wiener path (save_noise=true); at L=200,
+            # dt=0.001 that's ~10 GB per chunk. Drop the references and force a collection
+            # before the next chunk allocates, or peak RSS stacks across chunks and OOMs.
+            sol_fine = nothing
+            sol_coarse = nothing
+            GC.gc()
         end
         F_fine ./= nchunks
         F_coarse ./= nchunks

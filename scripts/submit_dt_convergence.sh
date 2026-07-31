@@ -9,14 +9,17 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --time=24:00:00
 
 # Memory note: the CRN fine solve runs with save_noise=true, storing the full Wiener path
 # (an L^2-vector per internal step) so the coarse solve can replay it. At L=200 with the
 # dt=0.001 candidate that path is ~10 GB, and SRA1's RSWM keeps two noise arrays, so peak
-# RSS lands in the low tens of GB. 4G/core OOM-killed it; 32G total gives headroom on the
-# worst (finest-dt) task. Pass `sbatch --mem=64G ...` to override if a candidate dt goes finer.
+# RSS lands in the low tens of GB. 4G/core OOM-killed it, then 32G OOM-killed it too because
+# nchunks=4 chunks' worth of noise arrays weren't collected before the next chunk allocated
+# (see the explicit GC.gc() per chunk in dt_convergence_crn.jl). 64G gives headroom on the
+# worst (finest-dt, v=10) task even with prompt collection. Pass `sbatch --mem=... ` to
+# override further if a candidate dt goes finer.
 
 # One array task per candidate dt: each runs the CRN dt-convergence bake-off across the
 # anchor velocities (worst case v=10, then 1 and 0.1) at L=200, coupling dt and dt/2 on a
