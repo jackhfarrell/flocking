@@ -9,17 +9,19 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
+#SBATCH --mem=24G
 #SBATCH --time=24:00:00
 
 # The PRD (dt-convergence is a local/intensive accuracy question) calibrates dt on small L,
 # not the L=200 production lattice, and dt is assumed to transfer. Running this at L=200 was
 # the actual bug behind the earlier OOMs: the CRN fine solve runs with save_noise=true, storing
 # the full Wiener path (an L^2-vector per internal step), and at L=200/dt=0.001 that path alone
-# is ~10 GB before accounting for SRA1's RSWM overhead or nchunks. No amount of --mem or
-# per-chunk GC.gc() fixes that; it was solving the wrong problem. At the default L=40 the same
-# path is L=200's ~1/25th the size, so 8G is generous headroom. Pass `sbatch --mem=...` to
-# override if L or a candidate dt is pushed up.
+# is ~10 GB before accounting for SRA1's RSWM overhead or nchunks. At the default L=40 the same
+# path is only ~1/25th the size (well under 1 GB/chunk), but a straight 64G/25 -> 8G budget
+# still OOM'd partway into the second anchor velocity: OS reclaim of a freed chunk's arrays
+# lags the in-process GC.gc(), so consecutive chunks/velocities can overlap in resident memory
+# even though the live heap is small. 24G buys headroom for that overlap plus Julia's own
+# package-load baseline. Pass `sbatch --mem=...` to override if L or a candidate dt is pushed up.
 
 # One array task per candidate dt: each runs the CRN dt-convergence bake-off across the
 # anchor velocities (worst case v=10, then 1 and 0.1) at small L, coupling dt and dt/2 on a
