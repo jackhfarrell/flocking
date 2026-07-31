@@ -3,23 +3,24 @@
 # Kept dependency-free and include-able so both the cluster/analysis scripts and the
 # test suite can pull them in without dragging along CairoMakie or the SDE solvers.
 
-# Production dt(v) from anchor dt-convergence rows. Each row is (; v, dt, dzeta): the
-# gap |zeta(dt) - zeta(dt/2)| the CRN harness measured for that (v, dt). For each v the
-# coarsest dt whose gap is within tol is production-adequate (coarser = cheaper); if no
-# candidate converged we fall back to the finest dt tried and flag it converged=false.
+# Production dt(v) from anchor dt-convergence rows. Each row is (; v, dt, gap): the largest
+# pointwise |F_coarse(r,t) - F_fine(r,t)| the CRN harness measured for that (v, dt) (see
+# dt_convergence_crn.jl). For each v the coarsest dt whose gap is within tol is
+# production-adequate (coarser = cheaper); if no candidate converged we fall back to the
+# finest dt tried and flag it converged=false.
 function select_production_dt(rows; tol=0.005)
     velocities = unique(row.v for row in rows)
-    schedule = NamedTuple{(:v, :dt, :dzeta, :converged),
+    schedule = NamedTuple{(:v, :dt, :gap, :converged),
         Tuple{Float64,Float64,Float64,Bool}}[]
     for v in velocities
         candidates = [row for row in rows if row.v == v]
-        converged = [row for row in candidates if row.dzeta < tol]
+        converged = [row for row in candidates if row.gap < tol]
         if isempty(converged)
             row = candidates[argmin([c.dt for c in candidates])]
-            push!(schedule, (; v, dt=row.dt, dzeta=row.dzeta, converged=false))
+            push!(schedule, (; v, dt=row.dt, gap=row.gap, converged=false))
         else
             row = converged[argmax([c.dt for c in converged])]
-            push!(schedule, (; v, dt=row.dt, dzeta=row.dzeta, converged=true))
+            push!(schedule, (; v, dt=row.dt, gap=row.gap, converged=true))
         end
     end
     sort!(schedule; by=s -> s.v)

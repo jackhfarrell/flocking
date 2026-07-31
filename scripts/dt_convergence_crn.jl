@@ -5,11 +5,16 @@
 # For each anchor velocity it integrates the SAME Wiener path at dt and dt/2 using
 # common-random-number (CRN) coupling: the fine (dt/2) solve records its Brownian
 # path, and the coarse (dt) solve is driven by that same path via NoiseWrapper, which
-# coarsens the fine increments onto the coarse grid. The dt and dt/2 correlator
-# windows are collapsed independently and the harness reports |ζ(dt) − ζ(dt/2)|.
-# Because the two solves share noise, the statistical fluctuation cancels and the
-# reported gap isolates the time-discretization error. Convergence criterion:
-# |Δζ| < ~0.005 (about a third of the statistical band).
+# coarsens the fine increments onto the coarse grid. dt error is a local/intensive
+# integration-accuracy question (see the PRD's "Solver and timestep" section), so
+# convergence is judged directly on the correlator itself: the largest pointwise gap
+# |F_coarse(r,t) - F_fine(r,t)| over the whole (r,t) grid. A ζ-based (least-squares
+# collapse or trough-position) criterion was tried first and dropped — both require the
+# correlator to have a well-resolved trough inside the box, which is a large-scale,
+# L-sensitive question entirely separate from dt, and at small/calibration-scale L that
+# requirement got contaminated by finite-size effects (the trough sitting near r_max)
+# well before dt error was even in play. Comparing F(r,t) pointwise needs no trough, no
+# fit, and no minimum box size to be meaningful. Convergence criterion: max |ΔF| < tol.
 
 using ArgParse
 using Dates
@@ -20,16 +25,6 @@ using StochasticDiffEq
 
 include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
-
-# Reuses the production least-squares data-collapse fit (scan_grid/evaluate_collapse) as
-# the zeta estimator. A simple trough-position fit was tried first and dropped: it isn't
-# robust (see issue 01, fit-window-robustness), and at v=10 in particular it locks onto
-# whatever bin is the argmin even when that's a boundary/noise artifact rather than the
-# real scaling front. The collapse objective's reduced_chi2 gives an honest goodness-of-fit
-# instead of silently trusting a single trough per lag.
-include(joinpath(@__DIR__, "spin_aligned_f_analysis.jl"))
-
-const POLY_ORDER = 3
 
 function loginfo(message::String, fields::Pair...)
     pieces = ["$(first(field))=$(repr(last(field)))" for field in fields]
@@ -174,45 +169,19 @@ function spin_aligned_f_correlator(window::AbstractVector, params::ModelParams,
     return F
 end
 
-# Mean and standard error across chunks, the same sum/sumsq -> stderr construction
-# check_v1_speedup.jl's load_streaming_stats uses across independent sample files.
-function chunk_mean_stderr(chunks::AbstractVector{<:AbstractMatrix})
-    n = length(chunks)
-    sum_F = sum(chunks)
-    sumsq_F = sum(F .^ 2 for F in chunks)
-    mean_F = sum_F ./ n
-    variance_F = max.((sumsq_F .- n .* mean_F .^ 2) ./ (n - 1), 0.0)
-    return mean_F, sqrt.(variance_F ./ n)
-end
+# Chunk-averaged F(r, t): chunks are repeated windows within one anchor/dt run, purely to
+# average down the correlator's own disorder noise. No stderr is needed here — CRN coupling
+# already cancels the stochastic component between the coarse and fine solves directly, so
+# the pointwise gap below reflects deterministic discretization bias, not sampling noise.
+chunk_mean(chunks::AbstractVector{<:AbstractMatrix}) = sum(chunks) ./ length(chunks)
 
-# Raw trough radius at each lag, with no power-law fit through it — purely a boundary-
-# contamination check, so it must survive exactly the noisy/near-zero traces that make a
-# trough-amplitude fit (spin_aligned_f_analysis.jl's feature_estimate) throw on log of a
-# slightly-negative amplitude.
-function max_trough_radius(F_mean::AbstractMatrix, radii::AbstractVector,
-        time_indices::AbstractVector{Int})
-    return maximum(radii[argmin(@view F_mean[:, tidx])] for tidx in time_indices)
-end
-
-# Fit zeta by the production least-squares data-collapse (scan_grid/evaluate_collapse),
-# coarse-then-fine as in check_v1_speedup.jl, rather than a trough-position power law: the
-# latter isn't robust (issue 01) and at v=10 can lock onto a boundary/noise artifact instead
-# of the real scaling front. Returns zeta, its reduced_chi2, and the trough radius at the
-# largest lag (a boundary-contamination check: if it sits near r_max, the front ran out of
-# room and even the collapse fit is being asked to fit a finite-size artifact).
-function collapse_zeta(radii::AbstractVector, times::AbstractVector, F_mean, F_stderr,
-        eta_values::AbstractVector, zeta_values::AbstractVector, nbins::Integer)
-    radius_mask = trues(length(radii))
-    time_indices = findall(>(0), times)
-    _, coarse_best = scan_grid(radii, times, F_mean, F_stderr, radius_mask, time_indices,
-        eta_values, zeta_values, POLY_ORDER, nbins)
-    eta_step = eta_values[2] - eta_values[1]
-    zeta_step = zeta_values[2] - zeta_values[1]
-    fine_eta = collect((coarse_best.eta - 3eta_step):(eta_step / 4):(coarse_best.eta + 3eta_step))
-    fine_zeta = collect((coarse_best.zeta - 3zeta_step):(zeta_step / 4):(coarse_best.zeta + 3zeta_step))
-    _, fine_best = scan_grid(radii, times, F_mean, F_stderr, radius_mask, time_indices,
-        fine_eta, fine_zeta, POLY_ORDER, nbins)
-    return fine_best.zeta, fine_best.reduced_chi2, max_trough_radius(F_mean, radii, time_indices)
+# Largest pointwise disagreement between the coarse and fine correlators, plus where it
+# occurs, so a REFINE line points at which (r, t) drove it.
+function max_pointwise_gap(F_coarse::AbstractMatrix, F_fine::AbstractMatrix,
+        radii::AbstractVector, times::AbstractVector)
+    diff = abs.(F_coarse .- F_fine)
+    idx = argmax(diff)
+    return diff[idx], radii[idx[1]], times[idx[2]]
 end
 
 function main()
@@ -223,7 +192,6 @@ function main()
     dr = args["dr"]
     ntimes = args["ntimes"]
     nchunks = args["nchunks"]
-    nchunks >= 2 || throw(ArgumentError("--nchunks must be at least 2 (chunks supply the collapse fit's per-point stderr)"))
     tol = args["tol"]
     solver = select_solver(args["solver"])
     velocities = parse.(Float64, split(args["velocities"], ","))
@@ -234,23 +202,19 @@ function main()
     sample_times = [0; cumsum(schedule.advance_gaps)] .* dt
     radii = collect(dr:dr:min(args["r-max"], L / 2))
     times = schedule.cum_steps .* dt
-    nbins = clamp(length(radii) ÷ 3, 5, 60)
-    coarse_eta = collect(-0.2:0.02:1.6)
-    coarse_zeta = collect(-0.2:0.02:1.2)
 
     @printf("# CRN dt-convergence harness  L=%d  J=%.3g  gamma=%.3g  solver=%s\n",
         L, args["J"], args["gamma"], args["solver"])
     @printf("# dt=%.2e  dt/2=%.2e  ntimes=%d  nchunks=%d  tol=%.4f\n",
         dt, dt_fine, ntimes, nchunks, tol)
-    @printf("# %-8s  %-10s  %-10s  %-10s  %s\n", "v", "zeta(dt)", "zeta(dt/2)", "|dzeta|", "status")
+    @printf("# %-8s  %-10s  %-10s  %-10s  %s\n", "v", "max|dF|", "r@max", "t@max", "status")
 
     loginfo("starting dt-convergence harness", :L => L, :J => args["J"],
         :gamma => args["gamma"], :solver => args["solver"], :dt => dt, :dt_fine => dt_fine,
         :velocities => Tuple(velocities), :ntimes => ntimes, :nchunks => nchunks, :tol => tol)
 
-    rows = NamedTuple{(:v, :dt, :dt_fine, :zeta_coarse, :zeta_fine, :dzeta, :converged,
-        :chi2_coarse, :chi2_fine),
-        Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Bool,Float64,Float64}}[]
+    rows = NamedTuple{(:v, :dt, :dt_fine, :gap, :r_at_max, :t_at_max, :converged),
+        Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Bool}}[]
     max_gap = 0.0
     for (vi, v) in enumerate(velocities)
         params = ModelParams(; L, Q=args["gamma"], J=args["J"], v)
@@ -290,34 +254,20 @@ function main()
             GC.gc()
         end
 
-        F_mean_fine, F_stderr_fine = chunk_mean_stderr(chunks_fine)
-        F_mean_coarse, F_stderr_coarse = chunk_mean_stderr(chunks_coarse)
-        zeta_fine, chi2_fine, r_last_fine = collapse_zeta(radii, times, F_mean_fine,
-            F_stderr_fine, coarse_eta, coarse_zeta, nbins)
-        zeta_coarse, chi2_coarse, r_last_coarse = collapse_zeta(radii, times, F_mean_coarse,
-            F_stderr_coarse, coarse_eta, coarse_zeta, nbins)
-        gap = abs(zeta_coarse - zeta_fine)
+        F_mean_fine = chunk_mean(chunks_fine)
+        F_mean_coarse = chunk_mean(chunks_coarse)
+        gap, r_at_max, t_at_max = max_pointwise_gap(F_mean_coarse, F_mean_fine, radii, times)
         max_gap = max(max_gap, gap)
         converged = gap < tol
-        push!(rows, (; v, dt, dt_fine, zeta_coarse, zeta_fine, dzeta=gap, converged,
-            chi2_coarse, chi2_fine))
+        push!(rows, (; v, dt, dt_fine, gap, r_at_max, t_at_max, converged))
         @printf("  %-8.3g  %-10.4f  %-10.4f  %-10.4f  %s\n",
-            v, zeta_coarse, zeta_fine, gap, converged ? "converged" : "REFINE")
-        loginfo("dt-convergence anchor", :v => v, :dt => dt, :zeta_coarse => zeta_coarse,
-            :zeta_fine => zeta_fine, :dzeta => gap, :converged => converged,
-            :chi2_coarse => chi2_coarse, :chi2_fine => chi2_fine)
-        # Boundary-contamination check: if the trough at the largest lag sits near the
-        # capped radius, the front ran out of room and the collapse fit is chasing a
-        # finite-size artifact rather than the real scaling front.
-        r_cap = radii[end]
-        near_boundary = max(r_last_fine, r_last_coarse) > 0.8 * r_cap
-        loginfo("trough boundary check", :v => v, :r_last_fine => r_last_fine,
-            :r_last_coarse => r_last_coarse, :r_cap => r_cap, :L_half => L / 2,
-            :near_boundary => near_boundary)
+            v, gap, r_at_max, t_at_max, converged ? "converged" : "REFINE")
+        loginfo("dt-convergence anchor", :v => v, :dt => dt, :gap => gap,
+            :r_at_max => r_at_max, :t_at_max => t_at_max, :converged => converged)
     end
 
     converged = max_gap < tol
-    @printf("# max |dzeta| = %.4f  ->  %s (tol %.4f)\n",
+    @printf("# max |dF| = %.4f  ->  %s (tol %.4f)\n",
         max_gap, converged ? "CONVERGED" : "NOT CONVERGED", tol)
 
     config = (; L, J=args["J"], gamma=args["gamma"], solver=args["solver"], dt, dt_fine,
@@ -326,14 +276,13 @@ function main()
     if !isempty(args["csv"])
         mkpath(dirname(abspath(args["csv"])))
         open(args["csv"], "w") do io
-            println(io, "v,dt,dt_fine,zeta_coarse,zeta_fine,dzeta,converged,chi2_coarse,chi2_fine")
+            println(io, "v,dt,dt_fine,gap,r_at_max,t_at_max,converged")
             for row in rows
                 println(io, join((
                     @sprintf("%.12g", row.v), @sprintf("%.12g", row.dt),
-                    @sprintf("%.12g", row.dt_fine), @sprintf("%.8f", row.zeta_coarse),
-                    @sprintf("%.8f", row.zeta_fine), @sprintf("%.8f", row.dzeta),
-                    row.converged ? 1 : 0, @sprintf("%.6g", row.chi2_coarse),
-                    @sprintf("%.6g", row.chi2_fine)), ","))
+                    @sprintf("%.12g", row.dt_fine), @sprintf("%.8f", row.gap),
+                    @sprintf("%.6g", row.r_at_max), @sprintf("%.6g", row.t_at_max),
+                    row.converged ? 1 : 0), ","))
             end
         end
     end
@@ -341,7 +290,7 @@ function main()
         mkpath(dirname(abspath(args["output"])))
         jldsave(args["output"]; result=(; config, rows))
     end
-    loginfo("finished dt-convergence harness", :max_dzeta => max_gap,
+    loginfo("finished dt-convergence harness", :max_gap => max_gap,
         :converged => converged, :csv => args["csv"], :output => args["output"])
     return converged
 end

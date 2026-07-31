@@ -545,8 +545,8 @@ end
     output = read(`$(Base.julia_cmd()) --project=$project $script --L 16 --nchunks 2
         --ntimes 3 --burnin-time 1.0 --T-max 3.0 --dr 1.0 --r-max 7.0
         --velocities 1.0 --base-seed 4`, String)
-    @test occursin("zeta(dt/2)", output)
-    @test occursin("max |dzeta|", output)
+    @test occursin("max|dF|", output)
+    @test occursin("max |dF|", output)
 end
 
 @testset "v10 equilibration driver records plateau timing" begin
@@ -573,15 +573,15 @@ end
 end
 
 @testset "calibration campaign selects dt(v) from anchor convergence" begin
-    # v=10: dt=0.001 converges (Δζ<tol), dt=0.002 does not -> pick coarsest converged dt.
+    # v=10: dt=0.001 converges (gap<tol), dt=0.002 does not -> pick coarsest converged dt.
     # v=1: both converge -> pick the coarser (0.002). v=0.1: neither -> finest dt, flagged.
     rows = [
-        (; v=10.0, dt=0.002, dzeta=0.010),
-        (; v=10.0, dt=0.001, dzeta=0.003),
-        (; v=1.0, dt=0.002, dzeta=0.002),
-        (; v=1.0, dt=0.001, dzeta=0.001),
-        (; v=0.1, dt=0.002, dzeta=0.020),
-        (; v=0.1, dt=0.001, dzeta=0.008),
+        (; v=10.0, dt=0.002, gap=0.010),
+        (; v=10.0, dt=0.001, gap=0.003),
+        (; v=1.0, dt=0.002, gap=0.002),
+        (; v=1.0, dt=0.001, gap=0.001),
+        (; v=0.1, dt=0.002, gap=0.020),
+        (; v=0.1, dt=0.001, gap=0.008),
     ]
     schedule = select_production_dt(rows; tol=0.005)
     @test [s.v for s in schedule] == [0.1, 1.0, 10.0]  # sorted ascending in v

@@ -25,7 +25,10 @@
 
 # One array task per candidate dt: each runs the CRN dt-convergence bake-off across the
 # anchor velocities (worst case v=10, then 1 and 0.1) at small L, coupling dt and dt/2 on a
-# shared Wiener path and reporting |zeta(dt) - zeta(dt/2)|. Each task writes its own CSV;
+# shared Wiener path and reporting the largest pointwise |F_coarse(r,t) - F_fine(r,t)| (a
+# zeta/collapse-based criterion was tried and dropped: it needs a box big enough to resolve
+# the correlator's trough, which is an L-sensitive question unrelated to dt error). Each
+# task writes its own CSV;
 # the operator assembles dt(v) by taking the coarsest dt whose gap is within tol per anchor
 # (scripts/calibration_schedule.jl:select_production_dt). Two candidates keep this trivially
 # within the <= 1000-job cap and each task within the 24h wall.
