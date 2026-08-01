@@ -32,6 +32,15 @@ function parse_args()
         "--dr"
             arg_type = Float64
             default = 0.25
+        "--r-max"
+            arg_type = Float64
+            default = 45.0
+        "--lag-spacing"
+            arg_type = String
+            default = "geometric"
+        "--solver"
+            arg_type = String
+            default = "SRA1"
         "--burnin-time"
             arg_type = Float64
             default = 20.0
@@ -74,6 +83,17 @@ function steps_for_time(time::Real, dt::Real, name::String)
     isapprox(steps * dt, time; atol=100eps(max(abs(time), abs(dt))), rtol=0) ||
         throw(ArgumentError("$name must be an integer multiple of dt"))
     return steps
+end
+
+# SRA1/SRA2/SRA3 are purpose-built for additive, state-independent noise (the model's
+# noise! fills with √Q); SRIW1/EM remain selectable for cross-checks.
+function select_solver(name::String)
+    name == "SRA1" && return SRA1()
+    name == "SRA2" && return SRA2()
+    name == "SRA3" && return SRA3()
+    name == "SRIW1" && return SRIW1()
+    name == "EM" && return EM()
+    throw(ArgumentError("unknown solver: $name (choose SRA1, SRA2, SRA3, SRIW1, EM)"))
 end
 
 function advance(theta, steps::Integer, dt::Real, work, solver, rng)
@@ -241,8 +261,10 @@ function main()
     dr = args["dr"]
     ntimes = args["ntimes"]
     nwindows = args["nwindows"]
+    lag_spacing = Symbol(args["lag-spacing"])
     lag_time = args["T-max"] / ntimes
     lag_steps = steps_for_time(lag_time, dt, "T-max / ntimes")
+    schedule = lag_step_schedule(ntimes, lag_steps; spacing=lag_spacing)
     burnin_steps = steps_for_time(args["burnin-time"], dt, "burnin-time")
     burnin_log_steps = steps_for_time(args["burnin-log-time"], dt, "burnin-log-time")
 
@@ -250,11 +272,12 @@ function main()
     rng = MersenneTwister(args["seed"])
     theta = initial_angles(rng, L, :ordered)
     work = LatticeFlockingSDE.DriftWorkspace(params)
-    solver = SRIW1()
+    solver = select_solver(args["solver"])
 
     dr <= L / 2 || throw(ArgumentError("--dr must be at most L / 2"))
-    radii = collect(dr:dr:(L / 2))
-    times = collect(0:ntimes) .* lag_steps .* dt
+    args["r-max"] > 0 || throw(ArgumentError("--r-max must be positive"))
+    radii = collect(dr:dr:min(args["r-max"], L / 2))
+    times = schedule.cum_steps .* dt
     log_radius_index = args["log-radius-index"]
     log_time_index = args["log-time-index"] == 0 ? ntimes + 1 : args["log-time-index"]
     1 <= log_radius_index <= length(radii) ||
@@ -287,11 +310,12 @@ function main()
         window[1] = copy(theta)
 
         for sample_index in 1:(2ntimes)
-            theta = advance(theta, lag_steps, dt, work, solver, rng)
+            theta = advance(theta, schedule.advance_gaps[sample_index], dt, work, solver, rng)
             window[sample_index + 1] = copy(theta)
             if sample_index == 1 || sample_index % args["window-log-every"] == 0 ||
                     sample_index == 2ntimes
-                @info "window integration progress" window=window_index nwindows sample=sample_index total_samples=2ntimes steps=sample_index * lag_steps total_steps=2ntimes * lag_steps time=sample_index * lag_time total_time=2 * args["T-max"]
+                elapsed_steps = sum(@view schedule.advance_gaps[1:sample_index])
+                @info "window integration progress" window=window_index nwindows sample=sample_index total_samples=2ntimes steps=elapsed_steps total_steps=2 * schedule.cum_steps[end] time=elapsed_steps * dt total_time=2 * schedule.cum_steps[end] * dt
             end
         end
 
@@ -312,6 +336,8 @@ function main()
         v=params.v,
         dt,
         dr,
+        r_max=args["r-max"],
+        lag_spacing,
         burnin_time=args["burnin-time"],
         burnin_steps,
         T_max=args["T-max"],

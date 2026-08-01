@@ -59,9 +59,15 @@ DT_CANDIDATES="${DT_CANDIDATES:-0.001,0.002}"
 DR="${DR:-0.25}"
 R_MAX="${R_MAX:-45}"
 BURNIN_TIME="${BURNIN_TIME:-40}"
-T_MAX="${T_MAX:-16}"
-NTIMES="${NTIMES:-8}"
-NCHUNKS="${NCHUNKS:-4}"
+# T_MAX/NTIMES kept short (not the L=16 production T_max=16): over a long window, coarse
+# and fine trajectories are nonlinear/chaotic and diverge regardless of dt, so the pointwise
+# gap stops reflecting discretization error (t_at_max drifts to the tail and the gap plateaus
+# instead of shrinking with dt). NCHUNKS=32 because the CRN-cancelled gap is itself a
+# per-realization residual that varies chunk to chunk; nchunks=4 wasn't enough
+# noise-averaging to pin it down to better than ~tol, giving non-monotonic gaps across dt.
+T_MAX="${T_MAX:-2}"
+NTIMES="${NTIMES:-4}"
+NCHUNKS="${NCHUNKS:-32}"
 TOL="${TOL:-0.005}"
 BASE_SEED="${BASE_SEED:-800000}"
 OUTPUT_DIR="${OUTPUT_DIR:-results/dt_convergence}"
