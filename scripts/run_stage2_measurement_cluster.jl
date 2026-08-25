@@ -29,6 +29,12 @@ function parse_args()
         "--traj"
             arg_type = Int
             default = 1
+        "--traj-first"
+            arg_type = Int
+            default = 1
+        "--ntrajectories"
+            arg_type = Int
+            default = 1
         "--L"
             arg_type = Int
             default = 200
@@ -110,6 +116,10 @@ function parse_args()
         "--output"
             arg_type = String
             default = ""
+        "--trajectory-subdirs"
+            action = :store_true
+        "--plan-only"
+            action = :store_true
     end
     return ArgParse.parse_args(settings)
 end
@@ -296,6 +306,8 @@ end
 function validate_args!(args, direction)
     direction in ("up", "down") || throw(ArgumentError("--direction must be up or down"))
     args["traj"] > 0 || throw(ArgumentError("--traj must be positive"))
+    args["traj-first"] > 0 || throw(ArgumentError("--traj-first must be positive"))
+    args["ntrajectories"] > 0 || throw(ArgumentError("--ntrajectories must be positive"))
     args["L"] > 1 || throw(ArgumentError("--L must be greater than 1"))
     args["gamma"] >= 0 || throw(ArgumentError("--gamma must be nonnegative"))
     args["vmin"] > 0 || throw(ArgumentError("--vmin must be positive"))
@@ -335,11 +347,23 @@ function main()
 
     vgrid = exp.(range(log(args["vmin"]), log(args["vmax"]); length=args["nv"]))
     budget = parse_budget(args, vgrid)
-    plan = job_plan(budget, chunks_per_job)
+    trajectory_plan = job_plan(budget, chunks_per_job)
+    jobs_per_trajectory = length(trajectory_plan)
+    traj_first = args["ntrajectories"] == 1 && args["traj"] != 1 ?
+        args["traj"] : args["traj-first"]
+    trajectories = traj_first:(traj_first + args["ntrajectories"] - 1)
+    plan = [(traj, vi, chunks, local_id)
+        for traj in trajectories
+        for (local_id, (vi, chunks)) in enumerate(trajectory_plan)]
     njobs = length(plan)
     njobs <= args["max-jobs"] ||
         throw(ArgumentError("plan needs $(njobs) tasks, exceeding --max-jobs " *
             "$(args["max-jobs"]); raise --chunks-per-job or lower the budget"))
+
+    if args["plan-only"]
+        println(njobs)
+        return
+    end
 
     array_count = args["array-count"] == 0 ? njobs : args["array-count"]
     array_id = slurm_array_id(args)
@@ -347,9 +371,9 @@ function main()
         throw(ArgumentError("array id $(array_id) is out of range 1:$(njobs) " *
             "(total tasks for this budget)"))
 
-    vi, chunks = plan[array_id]
+    traj, vi, chunks, local_id = plan[array_id]
     v = vgrid[vi]
-    input = checkpoint_path(args["library-dir"], vi, v, direction, args["traj"])
+    input = checkpoint_path(args["library-dir"], vi, v, direction, traj)
     isfile(input) || throw(ArgumentError("no baked state for v at $(input)"))
     baked = load(input, "result")
     theta0 = collect(baked.theta)
@@ -358,12 +382,18 @@ function main()
         output = args["output"]
     else
         key = @sprintf("v_%02d_%.6f", vi, v)
-        output = joinpath(args["output-dir"], key, "sample_$(@sprintf("%04d", array_id)).jld2")
+        sample = "sample_$(@sprintf("%04d", local_id)).jld2"
+        if args["trajectory-subdirs"]
+            output = joinpath(args["output-dir"], @sprintf("traj_%03d", traj), key,
+                sample)
+        else
+            output = joinpath(args["output-dir"], key, sample)
+        end
     end
 
     params = ModelParams(; L, Q=gamma, J, v)
     work = LatticeFlockingSDE.DriftWorkspace(params)
-    seed = args["base-seed"] + array_id - 1
+    seed = args["base-seed"] + (traj - 1) * jobs_per_trajectory + local_id - 1
     rng = MersenneTwister(seed)
 
     dr <= L / 2 || throw(ArgumentError("--dr must be at most L / 2"))
@@ -385,7 +415,7 @@ function main()
         :budget_v => budget[vi],
         :chunks => chunks,
         :direction => direction,
-        :traj => args["traj"],
+        :traj => traj,
         :equilibrium => input,
         :output => output,
         :L => L,
@@ -477,7 +507,7 @@ function main()
         lag_time,
         lag_steps,
         direction,
-        traj=args["traj"],
+        traj,
         budget_v=budget[vi],
         chunks,
         nwindows=chunks,
@@ -485,6 +515,7 @@ function main()
         array_id,
         array_count,
         njobs,
+        jobs_per_trajectory,
         seed,
         base_seed=args["base-seed"],
         equilibrium=input,

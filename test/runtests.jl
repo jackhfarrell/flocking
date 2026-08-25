@@ -8,6 +8,7 @@ include(joinpath(@__DIR__, "..", "src", "LatticeFlockingSDE.jl"))
 using .LatticeFlockingSDE
 
 include(joinpath(@__DIR__, "..", "scripts", "calibration_schedule.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "stage2_sweep_ensemble.jl"))
 
 const DEFAULT_ACTIVE_SNAPSHOT_DT = 2.0^-9
 
@@ -436,7 +437,7 @@ end
 
     run(`$(Base.julia_cmd()) --project=$project $ladder
         --L 6 --gamma 0.0 --J 1.0 --dt 0.001 --vmin 0.5 --vmax 2.0 --nv 3
-        --directions up --ntrajectories 1 --base-seed 5 --init ordered
+        --directions up --ntrajectories 2 --base-seed 5 --init ordered
         --equil-block-steps 1 --equil-max-blocks 3 --equil-window 1
         --equil-window-time 0 --equil-energy-threshold 1e9
         --equil-magnetization-threshold 1e9 --equil-log-every 1
@@ -445,19 +446,20 @@ end
     # Budget 4,2,1 is chi-squared-shaped (heavier at low v). With chunks-per-job 2 the
     # low-v rung spills into two single-core array tasks; both target v = 0.5.
     stage2_args = String[
-        "--library-dir", library, "--direction", "up", "--traj", "1",
+        "--library-dir", library, "--direction", "up", "--ntrajectories", "2",
+        "--trajectory-subdirs",
         "--L", "6", "--gamma", "0.0", "--J", "1.0",
         "--vmin", "0.5", "--vmax", "2.0", "--nv", "3",
         "--window-budget", "4,2,1", "--chunks-per-job", "2",
         "--dt", "0.001", "--dr", "0.5", "--r-max", "3.0", "--solver", "SRA1",
         "--T-max", "1", "--ntimes", "1", "--output-dir", output_dir,
     ]
-    for array_id in (1, 2)
+    for array_id in 1:8
         run(`$(Base.julia_cmd()) --project=$project $stage2 $(stage2_args) --array-id $array_id`)
     end
 
     # Both tasks land in the v = 0.5 subdirectory as collapse-ready sample files.
-    vdir = joinpath(output_dir, "v_01_0.500000")
+    vdir = joinpath(output_dir, "traj_001", "v_01_0.500000")
     files = sort(filter(f -> startswith(f, "sample_"), readdir(vdir)))
     @test files == ["sample_0001.jld2", "sample_0002.jld2"]
 
@@ -477,6 +479,13 @@ end
     @test !hasproperty(result.config, :burnin_steps)
     @test result.config.equilibrium ==
         joinpath(library, "v_01_0.500000", "up_traj_001.jld2")
+
+    sweep = load_stage2_sweep(output_dir)
+    @test sweep.v_values == [0.5, 1.0, 2.0]
+    @test sweep.nsamples == 2
+    @test sweep.nfiles == 8
+    @test size(sweep.mean_F) == (3, length(result.radii), 2)
+    @test all(isfinite, sweep.mean_F)
 
     # An array id past the budget's task table is rejected.
     bad = Cmd(`$(Base.julia_cmd()) --project=$project $stage2 $(stage2_args) --array-id 99`;

@@ -95,6 +95,11 @@ such as `dt = 2^-10`.
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
+## Production exponent sweep
+
+See [PRODUCTION.md](PRODUCTION.md) for the exact CU-cluster command that measures and plots
+the spin-aligned scaling exponent ζ as a function of `v`.
+
 ## Current Output Index
 
 See `analysis/run_index.md` for a human-readable summary of existing legacy
