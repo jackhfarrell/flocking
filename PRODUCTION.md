@@ -24,8 +24,10 @@ inside each allocation.
 ## Production design
 
 The default campaign has 3 temperatures, 30 velocities, 20 trajectories, and 2 directions.
-Each measurement array therefore has 600 tasks, below Alpine's 1000-task limit. Low velocity
-gets 10 windows per trajectory and high velocity gets 2, with a linear budget in `log(v)`.
+Each measurement array has 20 tasks, one per trajectory. A task uses 30 Julia threads for
+the velocity points, which keeps the full campaign below Alpine's submitted-job limit. Low
+velocity gets 10 windows per trajectory and high velocity gets 2, with a linear budget in
+`log(v)`.
 
 The temperatures stay in the ordered passive phase while spanning a useful range
 
@@ -38,7 +40,7 @@ Override a campaign at submission time with environment variables.
 
 ```bash
 TEMPERATURES_CSV=0.2,0.35,0.5,0.65,0.8 \
-NTRAJECTORIES=24 NV=30 MAX_CONCURRENT=80 \
+NTRAJECTORIES=24 NV=30 MAX_MEASURE_CONCURRENT=4 MEASURE_CPUS=30 \
 bash slurm/submit_exponent_sweep.sh
 ```
 

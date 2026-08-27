@@ -5,8 +5,8 @@
 #SBATCH --qos=cpu-normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=6G
+#SBATCH --cpus-per-task=30
+#SBATCH --mem=12G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/exponent_sweep/%A_%a_measure.out
 #SBATCH --error=logs/exponent_sweep/%A_%a_measure.err
@@ -29,6 +29,7 @@ julia --startup-file=no --project=. --threads="${JULIA_NUM_THREADS}" \
     scripts/measure_exponent_sweep.jl \
     --temperature "${temperature}" \
     --direction "${direction}" \
+    --trajectory "${SLURM_ARRAY_TASK_ID}" \
     --ntrajectories "${NTRAJECTORIES:-20}" \
     --L "${L:-200}" --Q "${Q:-1}" --dt "${DT:-0.0009765625}" \
     --v-min "${V_MIN:-0.1}" --v-max "${V_MAX:-10}" --nv "${NV:-30}" \
