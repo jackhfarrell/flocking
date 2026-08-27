@@ -1,3 +1,5 @@
+# The equilibrium weight of the passive model is exp(-H), so J is the inverse
+# dimensionless temperature. Q multiplies both relaxation and noise and only sets time.
 struct ModelParams
     L::Int
     Q::Float64

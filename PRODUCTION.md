@@ -1,77 +1,73 @@
-# Production ζ(v) run
+# Alpine exponent sweep
 
-The production pipeline measures the spin-aligned correlator at 30 log-spaced velocities
-from `v = 0.1` to `v = 10`, separately for the up- and down-sweep equilibrium libraries,
-then writes the two-direction ζ(v) CSV, plot, and fit-window robustness results.
+The production run measures `ζ(v, T)` from the spin-aligned correlator. It uses independent
+equilibrated states as statistical samples and runs each velocity ladder in both directions.
 
-## Prerequisite
+## Submit
 
-`library/J2_Q1_L200` must contain the completed Stage-1 library. Every `v_*` directory must
-have the same numbered `up_traj_*.jld2` and `down_traj_*.jld2` checkpoints. The launcher
-checks the rung and checkpoint counts before submitting anything.
-
-The calibrated production values of `DT` and `T_MAX` must also be chosen before launch.
-Their current script defaults are `DT=0.001` and `T_MAX=16`. The launcher measures through
-`r = 60`: the primary exponent fit uses `r <= 40`, while the robustness scan compares
-cutoffs at `r <= 20`, `40`, and `60`.
-
-## Submit the complete run
-
-From the repository root on the CU cluster:
+Keep the checkout under `/scratch/alpine/jafa3629/src` and submit from an Alpine login node.
 
 ```bash
 ssh jafa3629@login.rc.colorado.edu
-cd /path/to/flocking
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-DT=0.001 T_MAX=16 bash scripts/submit_stage2_production.sh
+cd /scratch/alpine/jafa3629/src/flocking
+bash slurm/submit_exponent_sweep.sh
 ```
 
-The launcher discovers the number of Stage-1 trajectories, computes the χ²-shaped array
-size, and submits batches of at most 1000 tasks. Batches run in sequence, up sweep before
-down sweep. A final dependent Slurm job runs both the ζ(v) comparison and the robustness
-scan. Cluster defaults are allocation `ucb792_asc1`, partition `amilan`, and QoS `normal`.
+The launcher first instantiates and precompiles the project inside an `acpu` allocation. It
+then submits six equilibrium arrays, one for each temperature and direction, six dependent
+measurement arrays, and one final analysis job.
 
-With the defaults, the per-trajectory velocity budgets are
+The defaults use allocation `ucb819_asc1`, partition `acpu`, QoS `cpu-normal`, and the
+installed Julia 1.12.7 binary. The job scripts set the versioned depot and thread count
+inside each allocation.
+
+## Production design
+
+The default campaign has 3 temperatures, 30 velocities, 20 trajectories, and 2 directions.
+Each measurement array therefore has 600 tasks, below Alpine's 1000-task limit. Low velocity
+gets 10 windows per trajectory and high velocity gets 2, with a linear budget in `log(v)`.
+
+The temperatures stay in the ordered passive phase while spanning a useful range
 
 ```text
-89,76,65,55,47,40,34,29,25,21,18,15,13,11,10,8,7,6,5,4,4,3,3,2,2,2,1,1,1,1
+T = 0.25, 0.5, 0.8
+J = 4.0, 2.0, 1.25
 ```
 
-This is 598 windows and 49 array tasks per trajectory at 20 chunks per job. The launcher
-therefore places at most 20 trajectories in each 980-task batch.
-
-To use an explicit trajectory count or a larger budget:
+Override a campaign at submission time with environment variables.
 
 ```bash
-NTRAJECTORIES=40 \
-BUDGET_TOTAL=1200 \
-DT=0.0005 T_MAX=12 \
-bash scripts/submit_stage2_production.sh
+TEMPERATURES_CSV=0.2,0.35,0.5,0.65,0.8 \
+NTRAJECTORIES=24 NV=30 MAX_CONCURRENT=80 \
+bash slurm/submit_exponent_sweep.sh
 ```
 
-## Monitor
+The measurement scripts use a conservative fixed step `dt = 2^-10`, geometric lags through
+`T_max = 16`, and radii through `r = 60`. The reference fit uses `r <= 40`. The robustness
+scan also uses `r <= 20`, `r <= 60`, and fits with the first or last positive lag removed.
+
+## Outputs
+
+```text
+library/exponent_sweep/T_*/
+results/exponent_sweep/T_*/{up,down}/
+analysis/exponent_sweep/zeta_by_direction.csv
+analysis/exponent_sweep/zeta_vs_v_temperature.csv
+analysis/exponent_sweep/zeta_vs_v_temperature.{png,pdf}
+analysis/exponent_sweep/summary.md
+logs/exponent_sweep/
+```
+
+The main curve is the midpoint of the up and down fits. Its plotted uncertainty is the
+largest of the local collapse sensitivity, the fit-window half-spread, and the up-down
+half-difference. Filled and open points retain the two directions, so a hysteretic region is
+visible rather than folded into an error bar.
+
+Monitor the run with
 
 ```bash
 squeue -u "$USER" -o '%.18i %.24j %.2t %.10M %.6D %R'
 ```
 
-Logs are written below `logs/stage2_zeta_v/`.
-
-## Run only the final analysis
-
-If the measurements already exist:
-
-```bash
-sbatch --account=ucb792_asc1 --partition=amilan --qos=normal \
-  scripts/analyze_stage2_production.sh
-```
-
-The main deliverables are:
-
-- `results/spin_aligned_f_stage2_L200_J2_Q1/zeta_vs_logv_two_direction/zeta_vs_logv_two_direction.csv`
-- `figures/spin_aligned_f_stage2_L200_J2_Q1/zeta_vs_logv_two_direction_trace_collapse.png`
-- `results/spin_aligned_f_stage2_L200_J2_Q1/zeta_fit_window_robustness/{up,down}/zeta_fit_window_robustness.csv`
-
-The analysis first combines all chunks belonging to one baked trajectory, then computes
-the standard error across independent Stage-1 trajectories. It does not treat correlated
-within-trajectory chunks as independent samples.
+Scratch is not backed up. Copy the final analysis directory and any unique equilibrium
+library to durable storage when the dependent analysis job finishes.

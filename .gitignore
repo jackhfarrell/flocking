@@ -4,6 +4,16 @@
 __pycache__/
 *.py[cod]
 
+# Simulation output stays on scratch or durable data storage, not in Git.
+/figures/
+/results/
+/library/
+/logs/
+
+# Local agent tooling is unrelated to the Julia project.
+/node_modules/
+/.sandcastle/
+
 # Generated cache directories
 .cache/
 .mplcache/
