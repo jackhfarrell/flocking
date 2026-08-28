@@ -48,6 +48,12 @@ settings = ArgParseSettings(description="Measure one trajectory of the exponent 
     "--nv"
         arg_type = Int
         default = 30
+    "--velocity-index-min"
+        arg_type = Int
+        default = 1
+    "--velocity-index-max"
+        arg_type = Int
+        default = 0
     "--dr"
         arg_type = Float64
         default = 0.5
@@ -93,9 +99,13 @@ if args["trajectory"] == 0
     velocity_indices = mod1(array_id, nv):mod1(array_id, nv)
 else
     trajectory = args["trajectory"]
-    velocity_indices = 1:nv
+    last_velocity_index = args["velocity-index-max"] == 0 ?
+        nv : args["velocity-index-max"]
+    velocity_indices = args["velocity-index-min"]:last_velocity_index
 end
 trajectory <= args["ntrajectories"] || error("trajectory exceeds the sweep size")
+first(velocity_indices) >= 1 && last(velocity_indices) <= nv ||
+    error("velocity index range must lie between 1 and nv")
 
 L = args["L"]
 Q = args["Q"]
@@ -110,13 +120,20 @@ solver = SRA1()
 
 Threads.@threads for vi in velocity_indices
     v = v_values[vi]
+    key = @sprintf("v_%02d_%.8f", vi, v)
+    output = joinpath(args["output-dir"], @sprintf("traj_%03d", trajectory), key,
+        "measurement.jld2")
+    if isfile(output)
+        @info "loaded measurement" temperature direction trajectory vi v output
+        continue
+    end
+
     fraction = (log(args["v-max"]) - log(v)) /
         (log(args["v-max"]) - log(args["v-min"]))
     nwindows = round(Int, args["windows-high-v"] +
         (args["windows-low-v"] - args["windows-high-v"]) *
         fraction^args["budget-power"])
 
-    key = @sprintf("v_%02d_%.8f", vi, v)
     input = joinpath(args["library-dir"], key,
         @sprintf("%s_traj_%03d.jld2", direction, trajectory))
     baked = load(input, "result")
@@ -161,8 +178,6 @@ Threads.@threads for vi in velocity_indices
         equilibrium=input,
     )
     result = (; config, radii, times, F_mean, F_stderr)
-    output = joinpath(args["output-dir"], @sprintf("traj_%03d", trajectory), key,
-        "measurement.jld2")
     mkpath(dirname(output))
     jldsave(output; result)
     @info "saved measurement" temperature direction trajectory vi v output

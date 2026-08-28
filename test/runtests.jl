@@ -130,19 +130,22 @@ end
     @test length(checkpoints) == 2
     @test all(load(path, "result").config.reached for path in checkpoints)
 
-    run(`$(Base.julia_cmd()) --threads=2 --project=$project $measure
+    measure_command = `$(Base.julia_cmd()) --threads=2 --project=$project $measure
         --temperature 1 --direction up --ntrajectories 1 --trajectory 1
         --L 6 --Q 0 --dt 0.001 --v-min 0.5 --v-max 1 --nv 2
+        --velocity-index-min 1 --velocity-index-max 1
         --dr 0.5 --r-max 3 --T-max 0.003 --ntimes 3
         --windows-low-v 1 --windows-high-v 1
-        --library-dir $library --output-dir $output`)
+        --library-dir $library --output-dir $output`
+    run(measure_command)
+    run(measure_command)
 
     result_files = [
         joinpath(dir, name) for (dir, _, names) in walkdir(output) for name in names
         if name == "measurement.jld2"
     ]
-    @test length(result_files) == 2
-    result_file = only(filter(path -> load(path, "result").config.vi == 1, result_files))
+    @test length(result_files) == 1
+    result_file = only(result_files)
     result = load(result_file, "result")
     @test result.config.temperature == 1.0
     @test result.config.J == 1.0

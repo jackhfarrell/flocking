@@ -100,3 +100,44 @@ squeue -u "$USER" -o '%.18i %.24j %.2t %.10M %.6D %R'
 
 Scratch is not backed up. Copy the final analysis directory and any unique equilibrium
 library to durable storage when the dependent analysis job finishes.
+
+## Precision campaign
+
+The precision campaign keeps the original velocity ladders and extends them from 20 to 80
+independent trajectories in each direction. It remeasures all 80 trajectories at the 22
+velocities shown in the paper figure, through `log10(v) = 0.448`. The 16 positive lags run
+from `t = 4` through `t = 64`.
+
+```bash
+bash slurm/submit_exponent_precision.sh
+```
+
+The launcher submits 360 new equilibrium tasks and 480 measurement tasks. Each measurement
+task processes one trajectory, so its longer measurement stays below the 24 hour job limit.
+The complete campaign remains below Alpine's submitted-job limit. Completed equilibrium
+rungs and measurements are reused if the launcher is run again.
+
+The longer measurements are separate from the original sweep.
+
+```text
+results/exponent_precision/T_*/{up,down}/
+analysis/exponent_precision/zeta_late_time.csv
+analysis/exponent_precision/zeta_time_convergence.csv
+analysis/exponent_precision/summary.md
+logs/exponent_precision/
+```
+
+The final analysis pools 80 up and 80 down trajectories at the correlator level, uses the
+last six time lags for the reference fit, and draws 500 stratified trajectory bootstraps.
+
+After this campaign and its analysis finish, a short second campaign extends every plotted
+velocity to 100 trajectories per direction without repeating the first 80 measurements.
+
+```bash
+NTRAJECTORIES=100 EXISTING_TRAJECTORIES=80 \
+MEASURE_TRAJECTORY_START=81 \
+bash slurm/submit_exponent_precision.sh
+```
+
+This second launch adds trajectories 81 through 100. Do not submit it while the first
+campaign is still queued.
