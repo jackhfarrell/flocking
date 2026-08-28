@@ -68,6 +68,48 @@ end
     @test abs(fit.best.zeta - zeta) <= 0.02
     robustness = fit_window_robustness(radii, times, mean_F, stderr_F)
     @test robustness.halfspread <= 0.05
+
+    time_indices = findall(>(0), times)
+    common = best_common_grid_collapse(radii, times, mean_F, time_indices)
+    @test abs(common.best.zeta - zeta) <= 0.02
+    fixed = best_fixed_common_grid_collapse(
+        radii, times, mean_F, time_indices, zeta)
+    @test fixed.score <= 1.05 * common.best.score
+end
+
+@testset "convergence analysis script" begin
+    project = joinpath(@__DIR__, "..")
+    input = joinpath(tempname(), "results")
+    output = joinpath(tempname(), "analysis")
+    radii = collect(0.5:0.5:10.0)
+    times = [0.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0]
+    rng = MersenneTwister(24)
+
+    for direction in ("up", "down"), trajectory in 1:3, vi in 1:2
+        v = vi == 1 ? 0.2 : 2.0
+        zeta = vi == 1 ? 0.5 : 3 / 8
+        F_mean = zeros(length(radii), length(times))
+        for tidx in 2:length(times)
+            scaled_radius = radii ./ times[tidx]^zeta
+            F_mean[:, tidx] .= times[tidx]^(-0.3) .*
+                exp.(-((scaled_radius .- 2) ./ 0.8).^2)
+        end
+        F_mean .+= 1e-4 .* randn(rng, size(F_mean))
+        config = (; vi, v, trajectory)
+        result = (; config, radii, times, F_mean)
+        path = joinpath(input, "T_1", direction, "traj_$(trajectory)",
+            "v_$(vi)", "measurement.jld2")
+        mkpath(dirname(path))
+        jldsave(path; result)
+    end
+
+    analysis = joinpath(project, "scripts", "analyze_exponent_convergence.jl")
+    run(`$(Base.julia_cmd()) --threads=2 --project=$project $analysis
+        --temperatures 1 --input-dir $input --output-dir $output
+        --bootstrap 2 --reference-points 5 --minimum-points 4
+        --rmax 8 --grid-points 24`)
+    @test length(readlines(joinpath(output, "zeta_late_time.csv"))) == 3
+    @test length(readlines(joinpath(output, "zeta_time_convergence.csv"))) == 9
 end
 
 @testset "production scripts" begin

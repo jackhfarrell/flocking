@@ -16,6 +16,8 @@ export observable_window_range, eta_window_range, eta_equilibrium_reached
 export equilibrium_window_blocks, equilibrium_stationarity_reached
 export expected_eta
 export best_collapse, fit_window_robustness
+export common_grid_collapse_score, best_common_grid_collapse
+export best_fixed_common_grid_collapse
 
 include("model.jl")
 include("observables.jl")

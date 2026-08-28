@@ -142,3 +142,105 @@ function fit_window_robustness(radii, times, F_mean, F_stderr)
     ]
     return (; reference, zetas, halfspread=(maximum(zetas) - minimum(zetas)) / 2)
 end
+
+# Compare every time trace on the same scaled-radius grid. This avoids changing the
+# membership of spatial bins as ζ moves through the fit grid.
+function interpolate_radius(radii, values, radius::Real, last_index::Integer)
+    index = searchsortedlast(radii, radius)
+    index <= 0 && return values[1]
+    index >= last_index && return values[last_index]
+    fraction = (radius - radii[index]) / (radii[index + 1] - radii[index])
+    return (1 - fraction) * values[index] + fraction * values[index + 1]
+end
+
+"""
+    common_grid_collapse_score(radii, times, F, time_indices, η, ζ;
+        rmax=40, grid_points=48)
+
+Measure the scatter of `t^η F(r,t)` after interpolation onto one common
+`r/t^ζ` grid. The score is the squared between-trace scatter divided by the total
+collapsed signal power. Radii and times receive equal weight because their errors are
+correlated within each trajectory.
+"""
+function common_grid_collapse_score(radii, times, F, time_indices,
+        eta::Real, zeta::Real; rmax::Real=40.0, grid_points::Integer=48)
+    last_index = searchsortedlast(radii, rmax)
+    last_index >= 2 || return Inf
+    length(time_indices) >= 3 || return Inf
+
+    x_scale = [times[index]^zeta for index in time_indices]
+    y_scale = [times[index]^eta for index in time_indices]
+    x_min = maximum(radii[1] ./ x_scale)
+    x_max = minimum(radii[last_index] ./ x_scale)
+    x_min < x_max || return Inf
+
+    values = zeros(Float64, length(time_indices))
+    residual = 0.0
+    power = 0.0
+    for x in range(x_min, x_max; length=grid_points)
+        for (slot, index) in enumerate(time_indices)
+            radius = x * x_scale[slot]
+            values[slot] = y_scale[slot] * interpolate_radius(
+                radii, @view(F[:, index]), radius, last_index)
+        end
+        average = mean(values)
+        residual += sum(value -> abs2(value - average), values)
+        power += sum(abs2, values)
+    end
+    power > eps(Float64) || return Inf
+    return residual / power
+end
+
+function scan_common_grid_collapse(radii, times, F, time_indices,
+        eta_values, zeta_values; rmax::Real=40.0, grid_points::Integer=48)
+    objective = fill(Inf, length(eta_values), length(zeta_values))
+    best = (; eta=NaN, zeta=NaN, score=Inf)
+    for (i, eta) in enumerate(eta_values), (j, zeta) in enumerate(zeta_values)
+        score = common_grid_collapse_score(radii, times, F, time_indices, eta, zeta;
+            rmax, grid_points)
+        objective[i, j] = score
+        score < best.score && (best = (; eta, zeta, score))
+    end
+    return (; objective, best)
+end
+
+"""
+    best_common_grid_collapse(radii, times, F, time_indices;
+        rmax=40, grid_points=48)
+
+Fit `η` and `ζ` with a coarse scan followed by a local scan at spacing `0.005`.
+The common-grid score does not assign independent statistical meaning to neighboring
+radii or times.
+"""
+function best_common_grid_collapse(radii, times, F, time_indices;
+        rmax::Real=40.0, grid_points::Integer=48)
+    coarse_eta = collect(-0.2:0.025:1.4)
+    coarse_zeta = collect(0.2:0.025:0.65)
+    coarse = scan_common_grid_collapse(radii, times, F, time_indices,
+        coarse_eta, coarse_zeta; rmax, grid_points)
+
+    fine_eta = collect((coarse.best.eta - 0.05):0.005:(coarse.best.eta + 0.05))
+    fine_zeta = collect((coarse.best.zeta - 0.05):0.005:(coarse.best.zeta + 0.05))
+    fine = scan_common_grid_collapse(radii, times, F, time_indices,
+        fine_eta, fine_zeta; rmax, grid_points)
+    return (; best=fine.best, coarse_objective=coarse.objective,
+        fine_objective=fine.objective, fine_eta, fine_zeta)
+end
+
+"""
+    best_fixed_common_grid_collapse(radii, times, F, time_indices, ζ;
+        rmax=40, grid_points=48)
+
+Fit the amplitude exponent `η` while keeping `ζ` fixed. The returned score can be
+compared with the free-fit score on the same data and fit window.
+"""
+function best_fixed_common_grid_collapse(radii, times, F, time_indices, zeta::Real;
+        rmax::Real=40.0, grid_points::Integer=48)
+    coarse_eta = collect(-0.2:0.025:1.4)
+    coarse = scan_common_grid_collapse(radii, times, F, time_indices,
+        coarse_eta, [zeta]; rmax, grid_points)
+    fine_eta = collect((coarse.best.eta - 0.05):0.005:(coarse.best.eta + 0.05))
+    fine = scan_common_grid_collapse(radii, times, F, time_indices,
+        fine_eta, [zeta]; rmax, grid_points)
+    return fine.best
+end

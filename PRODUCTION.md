@@ -65,6 +65,33 @@ largest of the local collapse sensitivity, the fit-window half-spread, and the u
 half-difference. Filled and open points retain the two directions, so a hysteretic region is
 visible rather than folded into an error bar.
 
+## Late-time convergence analysis
+
+The stricter analysis averages the two preparation directions at the correlator level and
+fits only the last five positive lags. It compares complete traces on a common scaled-radius
+grid and resamples whole trajectories within each direction.
+
+```bash
+sbatch slurm/analyze_exponent_convergence.sh 0.25,0.5,0.8 500
+```
+
+The job writes
+
+```text
+analysis/exponent_convergence/zeta_late_time.csv
+analysis/exponent_convergence/zeta_time_convergence.csv
+analysis/exponent_convergence/summary.md
+```
+
+After copying this directory to the local checkout, render the RevTeX figure with
+
+```bash
+python3 paper/zeta-convergence.py
+```
+
+The main panel shows the late-time bootstrap estimate. The two smaller panels show the fit
+drift as early lags are removed at one passive and one active velocity.
+
 Monitor the run with
 
 ```bash

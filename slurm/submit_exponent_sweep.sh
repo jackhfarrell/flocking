@@ -41,6 +41,5 @@ done
 dependency="$(IFS=:; echo "${measure_jobs[*]}")"
 analysis_job="$(sbatch --parsable \
     --dependency="afterok:${dependency}" \
-    --export="ALL,TEMPERATURES_CSV=${temperatures_csv}" \
-    slurm/analyze_exponent_sweep.sh)"
+    slurm/analyze_exponent_sweep.sh "${temperatures_csv}")"
 echo "analysis ${analysis_job}"
