@@ -50,6 +50,11 @@ end
     F = LatticeFlockingSDE.spin_aligned_correlators(window, L, 0.5:0.5:3.0)
     @test size(F) == (6, 3)
     @test all(iszero, F)
+
+    sampled = sample_fixed_window(
+        theta, schedule.advance_gaps, 0.001, work, SRA1(), MersenneTwister(3))
+    @test length(sampled) == 2length(schedule.gaps) + 1
+    @test all(state -> state == theta, sampled)
 end
 
 @testset "collapse exponent" begin

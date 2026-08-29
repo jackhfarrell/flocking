@@ -16,6 +16,26 @@ function advance_fixed(theta, steps::Integer, dt::Real, work, solver, rng)
     return wrap_angles!(collect(solution.u[end]))
 end
 
+# Advance an entire correlator window in one solve and retain only the requested states.
+function sample_fixed_window(theta, advance_gaps, dt::Real, work, solver, rng)
+    sample_steps = cumsum(advance_gaps)
+    problem = SDEProblem(
+        drift!,
+        noise!,
+        theta,
+        (0.0, sample_steps[end] * dt),
+        work,
+    )
+    solution = solve(problem, solver; dt, adaptive=false,
+        saveat=sample_steps .* dt, save_everystep=false, save_start=false, rng)
+    window = Vector{Vector{Float64}}(undef, length(sample_steps) + 1)
+    window[1] = copy(theta)
+    for index in eachindex(solution.u)
+        window[index + 1] = wrap_angles!(collect(solution.u[index]))
+    end
+    return window
+end
+
 # Interpolate the spin vector before taking its dot product with the reference spin.
 function interpolated_spin_dot(cos_field, sin_field, L::Integer, px::Real, py::Real,
         ref_cos::Real, ref_sin::Real)

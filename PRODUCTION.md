@@ -101,6 +101,44 @@ squeue -u "$USER" -o '%.18i %.24j %.2t %.10M %.6D %R'
 Scratch is not backed up. Copy the final analysis directory and any unique equilibrium
 library to durable storage when the dependent analysis job finishes.
 
+## Adaptive threaded velocity sweep
+
+The streaming convergence workflow runs one velocity and temperature per array task. Each
+task requests eight CPUs, advances eight independent chains, checkpoints after every round,
+and stops when its conservative uncertainty remains at or below `0.01`. The default sweep
+uses `L = 128`, at least 20 temporal blocks, and the three paper temperatures
+`T = 0.25, 0.5, 0.8` across the 22 logarithmic velocities from `v = 0.1` through `v = 2.807`.
+
+Submit all 66 resumable points with
+
+```bash
+bash slurm/submit_threaded_v_sweep.sh
+```
+
+The array allows 12 simultaneous points by default. The internal 10,000-round cap is high
+enough that the 24-hour Slurm allocation normally controls unconverged points. Override the
+concurrency limit or other run controls at submission time:
+
+```bash
+MAX_CONCURRENT=8 L=160 MINIMUM_BLOCKS=30 \
+bash slurm/submit_threaded_v_sweep.sh
+```
+
+The worker uses the between-chain standard error for stopping; the full chain range remains
+in the output as a mixing diagnostic. The delete-group jackknife, half-run drift, time-window
+sensitivity, radius-window sensitivity, and recent checkpoint drift must also all fall below
+the tolerance. A point that reaches the 24-hour or round limit remains checkpointed and will
+resume when the same sweep is submitted again.
+
+Outputs are collected after the array finishes:
+
+```text
+results/threaded_v_sweep/T_*/v_*.{jld2,csv}
+analysis/threaded_v_sweep/zeta_vs_v_temperature.csv
+analysis/threaded_v_sweep/summary.md
+logs/threaded_v_sweep/
+```
+
 ## Precision campaign
 
 The precision campaign keeps the original velocity ladders and extends them from 20 to 80
