@@ -58,8 +58,7 @@ function interpolated_spin_dot(cos_field, sin_field, L::Integer, px::Real, py::R
 end
 
 function spin_aligned_correlators(window::AbstractVector, L::Integer,
-        radii::AbstractVector)
-    nsites = L^2
+        radii::AbstractVector; origins=nothing)
     isodd(length(window)) || throw(ArgumentError("window length must be odd"))
 
     ntimes = length(window) ÷ 2
@@ -69,6 +68,8 @@ function spin_aligned_correlators(window::AbstractVector, L::Integer,
     cos_mid = cos_window[mid]
     sin_mid = sin_window[mid]
     F = zeros(Float64, length(radii), ntimes + 1)
+    origin_points = isnothing(origins) ? Iterators.product(1:L, 1:L) : origins
+    norigins = length(origin_points)
 
     @inbounds for (ridx, r) in enumerate(radii), lag in 0:ntimes
         cos_minus = cos_window[mid - lag]
@@ -77,8 +78,8 @@ function spin_aligned_correlators(window::AbstractVector, L::Integer,
         sin_plus = sin_window[mid + lag]
         accum = 0.0
 
-        for y in 1:L, x in 1:L
-            center = site_index(x, y, L)
+        for (x, y) in origin_points
+            center = x + (y - 1) * L
             cx = cos_mid[center]
             sy = sin_mid[center]
             dx = r * cx
@@ -96,7 +97,7 @@ function spin_aligned_correlators(window::AbstractVector, L::Integer,
             accum += 0.25 * (forward_plus + backward_minus -
                 forward_minus - backward_plus)
         end
-        F[ridx, lag + 1] = accum / nsites
+        F[ridx, lag + 1] = accum / norigins
     end
 
     return F

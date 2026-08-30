@@ -50,6 +50,9 @@ end
     F = LatticeFlockingSDE.spin_aligned_correlators(window, L, 0.5:0.5:3.0)
     @test size(F) == (6, 3)
     @test all(iszero, F)
+    origins = collect(Iterators.product(1:L, 1:L))
+    @test LatticeFlockingSDE.spin_aligned_correlators(
+        window, L, 0.5:0.5:3.0; origins) == F
 
     sampled = sample_fixed_window(
         theta, schedule.advance_gaps, 0.001, work, SRA1(), MersenneTwister(3))

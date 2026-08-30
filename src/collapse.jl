@@ -206,21 +206,25 @@ end
 
 """
     best_common_grid_collapse(radii, times, F, time_indices;
-        rmax=40, grid_points=48)
+        rmax=40, grid_points=48, zeta_min=0.2, zeta_max=0.65,
+        fine_eta_step=0.005, fine_zeta_step=0.005)
 
-Fit `η` and `ζ` with a coarse scan followed by a local scan at spacing `0.005`.
-The common-grid score does not assign independent statistical meaning to neighboring
-radii or times.
+Fit `η` and `ζ` with a coarse scan followed by a local scan. The common-grid score
+does not assign independent statistical meaning to neighboring radii or times.
 """
 function best_common_grid_collapse(radii, times, F, time_indices;
-        rmax::Real=40.0, grid_points::Integer=48)
+        rmax::Real=40.0, grid_points::Integer=48,
+        zeta_min::Real=0.2, zeta_max::Real=0.65,
+        fine_eta_step::Real=0.005, fine_zeta_step::Real=0.005)
     coarse_eta = collect(-0.2:0.025:1.4)
-    coarse_zeta = collect(0.2:0.025:0.65)
+    coarse_zeta = collect(zeta_min:0.025:zeta_max)
     coarse = scan_common_grid_collapse(radii, times, F, time_indices,
         coarse_eta, coarse_zeta; rmax, grid_points)
 
-    fine_eta = collect((coarse.best.eta - 0.05):0.005:(coarse.best.eta + 0.05))
-    fine_zeta = collect((coarse.best.zeta - 0.05):0.005:(coarse.best.zeta + 0.05))
+    fine_eta = collect((coarse.best.eta - 0.05):fine_eta_step:(coarse.best.eta + 0.05))
+    fine_zeta = collect(
+        max(zeta_min, coarse.best.zeta - 0.05):fine_zeta_step:
+        min(zeta_max, coarse.best.zeta + 0.05))
     fine = scan_common_grid_collapse(radii, times, F, time_indices,
         fine_eta, fine_zeta; rmax, grid_points)
     return (; best=fine.best, coarse_objective=coarse.objective,
