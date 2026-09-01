@@ -21,6 +21,10 @@ default_velocities+="8.912509381337454:10.0"
 velocities="${VELOCITIES:-${default_velocities}}"
 IFS=':' read -r -a velocity_values <<< "${velocities}"
 task_count=${#velocity_values[@]}
+array_spec="1-${task_count}"
+if [[ -n "${MAX_CONCURRENT:-}" ]]; then
+    array_spec+="%${MAX_CONCURRENT}"
+fi
 
 temperature="${TEMPERATURE:-0.8}"
 L="${L:-256}"
@@ -35,10 +39,13 @@ analysis_export="ALL,TEMPERATURE=${temperature},L=${L},TOLERANCE=${tolerance},\
 EXPECTED_POINTS=${task_count}"
 
 mkdir -p logs/exponent_sweep logs/reblocked_v_sweep
-setup_job=$(sbatch --parsable slurm/prepare_julia.sh)
+setup_job="${SETUP_JOB_ID:-}"
+if [[ -z "${setup_job}" ]]; then
+    setup_job=$(sbatch --parsable slurm/prepare_julia.sh)
+fi
 sweep_job=$(sbatch --parsable \
     --dependency="afterok:${setup_job}" \
-    --array="1-${task_count}" \
+    --array="${array_spec}" \
     --export="${sweep_export}" \
     slurm/run_reblocked_v_sweep.sh)
 monitor_export="${analysis_export},SWEEP_JOB_ID=${sweep_job},\
