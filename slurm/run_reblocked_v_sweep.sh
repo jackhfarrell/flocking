@@ -28,7 +28,7 @@ temperature="${TEMPERATURE:-0.8}"
 L="${L:-256}"
 temperature_tag=${temperature//./p}
 seed=$((${BASE_SEED:-3800000} + SLURM_ARRAY_TASK_ID))
-output_dir="results/reblocked_v_sweep/T_${temperature_tag}/L_${L}"
+output_dir="${OUTPUT_DIR:-results/reblocked_v_sweep/T_${temperature_tag}/L_${L}}"
 output="${output_dir}/v_$(printf '%03d' "${SLURM_ARRAY_TASK_ID}").jld2"
 
 julia --startup-file=no --project=. --threads="${JULIA_NUM_THREADS}" \
